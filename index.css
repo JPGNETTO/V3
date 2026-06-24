@@ -1,0 +1,28 @@
+/* Reset e tema escuro global */
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: #0a0a14;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* Impede zoom acidental ao tocar em inputs no Android */
+input, select, button {
+  font-size: 16px;
+}
+
+/* Esconde a barra de rolagem mas mantém o scroll */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
