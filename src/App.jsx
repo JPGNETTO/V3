@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useLayoutEffect } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, Area, AreaChart
@@ -129,6 +129,12 @@ const ATIVOS_INICIAIS = [
   { ticker:"WEGE3", nome:"Weg",              cat:"Ação",freq:"Semestral",  qtd:2,  prov:0.12,precoMedio:44.96,cotacao:45.71,meses:[4,10] },
   { ticker:"CPLE3", nome:"Copel",            cat:"Ação",freq:"Semestral",  qtd:3,  prov:0.22,precoMedio:15.63,cotacao:14.99,meses:[5,11] },
   { ticker:"SANB3", nome:"Santander",        cat:"Ação",freq:"Trimestral", qtd:102,prov:0.06,precoMedio:12.90,cotacao:12.86,meses:[3,6,9,12] },
+  { ticker:"EMBJ3", nome:"Embraer",          cat:"Ação",freq:"Anual",      qtd:2,  prov:0.55,precoMedio:79.62,cotacao:78.80,meses:[12] },
+  { ticker:"B3SA3", nome:"B3 Brasil Bolsa",  cat:"Ação",freq:"Trimestral", qtd:10, prov:0.12,precoMedio:15.63,cotacao:14.72,meses:[3,6,9,12] },
+  { ticker:"SBSP3", nome:"Sabesp",           cat:"Ação",freq:"Anual",      qtd:4,  prov:0.80,precoMedio:28.80,cotacao:28.16,meses:[8] },
+  { ticker:"BOVA11",nome:"iShares Ibovespa", cat:"Ação",freq:"Semestral",  qtd:3,  prov:1.50,precoMedio:175.40,cotacao:168.21,meses:[1,7] },
+  { ticker:"BOVX11",nome:"Trend Ibovespa",   cat:"Ação",freq:"Semestral",  qtd:3,  prov:0.15,precoMedio:20.12,cotacao:17.56,meses:[1,7] },
+  { ticker:"COIN11",nome:"Hashdex Nasdaq Crypto",cat:"Cripto",freq:"Mensal", qtd:33, prov:0.00,precoMedio:38.70,cotacao:39.20,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
 ];
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -712,6 +718,263 @@ function CenarioFuturo({ ativos, T }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// TRILHA DE METAS — progressão por estágios (cores quente → frio)
+// ════════════════════════════════════════════════════════════════════════════
+// Paleta de estágios: do quente (início) ao frio (meta final).
+// Início = vermelho/laranja, meio = amarelo/verde, fim = azul/ciano (mais frio).
+const CORES_ESTAGIOS = ["#ef4444","#f97316","#eab308","#22c55e","#06b6d4","#3b82f6"];
+
+function gerarEstagios(metaMensal, nEstagios) {
+  // divide a meta em N checkpoints proporcionais
+  const passo = metaMensal / nEstagios;
+  return Array.from({ length: nEstagios }, (_, i) => ({
+    idx: i + 1,
+    valor: +(passo * (i + 1)).toFixed(0),
+    cor: CORES_ESTAGIOS[i] || CORES_ESTAGIOS[CORES_ESTAGIOS.length - 1],
+  }));
+}
+
+function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, T }) {
+  const N = 5; // numero de estagios
+  const estagios = gerarEstagios(metaMensal, N);
+  const pctGeral = Math.min((valorAtual / metaMensal) * 100, 100);
+  const estagiosAlcancados = estagios.filter(e => valorAtual >= e.valor).length;
+  const metaBatida = valorAtual >= metaMensal;
+
+  // proximo estagio ainda nao alcancado (para o card "quanto falta")
+  const proximoEstagio = estagios.find(e => valorAtual < e.valor);
+  const faltaProximo = proximoEstagio ? proximoEstagio.valor - valorAtual : 0;
+  const faltaMetaFinal = metaBatida ? 0 : metaMensal - valorAtual;
+
+  return (
+    <div style={{ marginTop:14, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px 14px 14px" }}>
+      {/* cabeçalho da trilha */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <div>
+          <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>🎯 Meta de proventos / mês</div>
+          <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:2 }}>
+            <span style={{ fontSize:16, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
+            <span style={{ fontSize:11, color:T.textFaint }}>de {fmt(metaMensal)}</span>
+            {metaBatida && <span style={{ fontSize:10, color:T.green, fontWeight:700 }}>✓ batida!</span>}
+          </div>
+        </div>
+        <button onClick={onConfigurar} title="Definir meta" style={{
+          padding:"6px 10px", borderRadius:8, border:`1px solid ${T.border}`,
+          background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11, fontWeight:600,
+          display:"flex", alignItems:"center", gap:4
+        }}>🎯 Definir</button>
+      </div>
+
+      {/* trilha visual com setas/checkpoints */}
+      <div style={{ position:"relative", paddingTop:4 }}>
+        {/* setas dos estágios */}
+        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+          {estagios.map((e) => {
+            const alcancado = valorAtual >= e.valor;
+            return (
+              <div key={e.idx} style={{ flex:"1 1 0", display:"flex", flexDirection:"column", alignItems:"center" }}>
+                {/* seta para baixo (chevron) com número */}
+                <div style={{
+                  width:"100%", maxWidth:54, position:"relative",
+                  opacity: alcancado ? 1 : 0.32, transition:"opacity 0.3s"
+                }}>
+                  <div style={{
+                    background: alcancado ? e.cor : T.borderSoft,
+                    clipPath:"polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%)",
+                    height:36, display:"flex", alignItems:"flex-start", justifyContent:"center",
+                    paddingTop:5, borderRadius:"3px 3px 0 0"
+                  }}>
+                    <span style={{ fontSize:12, fontWeight:800, color:"#fff" }}>{String(e.idx).padStart(2,"0")}</span>
+                  </div>
+                </div>
+                {/* valor do checkpoint */}
+                <div style={{ fontSize:9, fontWeight:700, color: alcancado ? e.cor : T.textFaint, marginTop:3 }}>
+                  {fmtK(e.valor)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* linha fina de progresso */}
+        <div style={{ position:"relative", height:6, marginTop:4 }}>
+          {/* trilho cinza de fundo */}
+          <div style={{ position:"absolute", top:"50%", left:0, right:0, height:3, background:T.border, borderRadius:3, transform:"translateY(-50%)" }} />
+          {/* preenchimento colorido (gradiente quente→frio) */}
+          <div style={{
+            position:"absolute", top:"50%", left:0, width:`${pctGeral}%`, height:3,
+            background:`linear-gradient(to right, ${CORES_ESTAGIOS[0]}, ${CORES_ESTAGIOS[1]}, ${CORES_ESTAGIOS[2]}, ${CORES_ESTAGIOS[3]}, ${CORES_ESTAGIOS[4]})`,
+            borderRadius:3, transform:"translateY(-50%)", transition:"width 0.5s"
+          }} />
+          {/* pontos/marcadores em cada checkpoint */}
+          {estagios.map((e, i) => {
+            const alcancado = valorAtual >= e.valor;
+            const posPct = ((i + 1) / N) * 100;
+            return (
+              <div key={e.idx} style={{
+                position:"absolute", top:"50%", left:`${posPct}%`,
+                width:10, height:10, borderRadius:"50%",
+                background: alcancado ? e.cor : T.cardAlt,
+                border:`2px solid ${alcancado ? e.cor : T.borderSoft}`,
+                transform:"translate(-50%,-50%)", transition:"all 0.3s",
+                boxShadow: alcancado ? `0 0 8px ${e.cor}88` : "none"
+              }} />
+            );
+          })}
+        </div>
+
+        {/* resumo de progresso */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:10 }}>
+          <span style={{ fontSize:10, color:T.textFaint }}>
+            Estágio <strong style={{ color:T.text }}>{estagiosAlcancados}</strong> de {N}
+          </span>
+          <span style={{ fontSize:10, color:metaBatida?T.green:T.accentSoft, fontWeight:700 }}>
+            {pctGeral.toFixed(0)}% da meta
+          </span>
+        </div>
+      </div>
+
+      {/* CARD VERMELHO — quanto falta para a próxima meta (sempre visível, chamariz) */}
+      <div style={{
+        marginTop:12,
+        background: metaBatida ? `${T.green}14` : "rgba(239,68,68,0.12)",
+        border: `1.5px solid ${metaBatida ? T.green : "#ef4444"}`,
+        borderRadius:10, padding:"11px 13px",
+        display:"flex", alignItems:"center", justifyContent:"space-between", gap:10
+      }}>
+        {metaBatida ? (
+          <>
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ fontSize:20 }}>🏆</span>
+              <div>
+                <div style={{ fontSize:11, fontWeight:800, color:T.green }}>Meta final alcançada!</div>
+                <div style={{ fontSize:10, color:T.textMute, marginTop:1 }}>Você bateu todos os estágios. Hora de subir a meta.</div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:9, color:"#ef4444", textTransform:"uppercase", letterSpacing:0.5, fontWeight:700 }}>
+                ⚠️ Falta para a próxima meta
+              </div>
+              <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:3, flexWrap:"wrap" }}>
+                <span style={{ fontSize:20, fontWeight:800, color:"#ef4444" }}>{fmt(faltaProximo)}</span>
+                <span style={{ fontSize:10, color:T.textMute }}>
+                  para chegar em <strong style={{ color:T.text }}>{fmt(proximoEstagio.valor)}</strong>
+                </span>
+              </div>
+              <div style={{ fontSize:9, color:T.textFaint, marginTop:3 }}>
+                Faltam {fmt(faltaMetaFinal)} para a meta final de {fmt(metaMensal)}
+              </div>
+            </div>
+            {/* selo do estágio-alvo */}
+            <div style={{
+              flexShrink:0, width:42, height:48, position:"relative",
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center"
+            }}>
+              <div style={{
+                background: proximoEstagio.cor, width:"100%",
+                clipPath:"polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%)",
+                height:34, display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:5
+              }}>
+                <span style={{ fontSize:13, fontWeight:800, color:"#fff" }}>
+                  {String(proximoEstagio.idx).padStart(2,"0")}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODAL DEFINIR META
+// ════════════════════════════════════════════════════════════════════════════
+function ModalMeta({ metaMensal, setMetaMensal, valorAtual, onClose, T }) {
+  const [valor, setValor] = useState(metaMensal);
+  const estagios = gerarEstagios(valor || 1, 5);
+  const sugestoes = [300, 500, 1000, 2000, 5000];
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed", inset:0, background:"#000a", zIndex:1000,
+      display:"flex", alignItems:"flex-start", justifyContent:"center",
+      padding:"20px 12px", overflowY:"auto"
+    }}>
+      <div onClick={e=>e.stopPropagation()} style={{
+        background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16,
+        width:"100%", maxWidth:440, padding:"20px", boxShadow:"0 20px 60px #000c"
+      }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <div style={{ fontSize:18, fontWeight:800, color:T.text }}>🎯 Definir meta</div>
+          <button onClick={onClose} style={{ width:34, height:34, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:16 }}>✕</button>
+        </div>
+
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:6 }}>Meta de provento médio por mês (R$)</div>
+        <input type="number" min="1" value={valor} onChange={e=>setValor(Math.max(0, +e.target.value))}
+          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.accent}`, borderRadius:10, color:T.text, padding:"12px 14px", fontSize:22, fontWeight:800, textAlign:"center", marginBottom:12 }} />
+
+        {/* sugestões rápidas */}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:18 }}>
+          {sugestoes.map(s=>(
+            <button key={s} onClick={()=>setValor(s)} style={{
+              flex:"1 1 0", padding:"7px 4px", borderRadius:8, border:"none", cursor:"pointer",
+              fontSize:11, fontWeight:700,
+              background: valor===s ? T.accent : T.border, color: valor===s ? "#fff" : T.textMute
+            }}>{fmtK(s)}</button>
+          ))}
+        </div>
+
+        {/* prévia dos estágios gerados */}
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:8 }}>Prévia dos 5 estágios:</div>
+        <div style={{ display:"flex", gap:4, marginBottom:18 }}>
+          {estagios.map((e,i)=>(
+            <div key={e.idx} style={{ flex:"1 1 0", textAlign:"center" }}>
+              <div style={{
+                background:e.cor, borderRadius:6, height:30,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                clipPath:"polygon(0 0, 100% 0, 100% 65%, 50% 100%, 0 65%)"
+              }}>
+                <span style={{ fontSize:10, fontWeight:800, color:"#fff" }}>{String(e.idx).padStart(2,"0")}</span>
+              </div>
+              <div style={{ fontSize:9, fontWeight:700, color:e.cor, marginTop:4 }}>{fmtK(e.valor)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* status atual em relação à nova meta */}
+        <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px", marginBottom:16 }}>
+          <div style={{ fontSize:10, color:T.textFaint }}>Seu provento médio atual</div>
+          <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+            <span style={{ fontSize:15, fontWeight:800, color:T.accentSoft }}>{fmt(valorAtual)}/mês</span>
+            <span style={{ fontSize:11, color: valorAtual>=valor ? T.green : T.amber, fontWeight:700 }}>
+              {valor>0 ? `${Math.min((valorAtual/valor)*100,100).toFixed(0)}% da nova meta` : ""}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onClose} style={{ flex:"1 1 0", padding:"12px", borderRadius:10, border:`1px solid ${T.borderSoft}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:13, fontWeight:600 }}>
+            Cancelar
+          </button>
+          <button onClick={()=>{ setMetaMensal(valor||1); onClose(); }} style={{ flex:"1 1 0", padding:"12px", borderRadius:10, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:13, fontWeight:700 }}>
+            ✓ Salvar meta
+          </button>
+        </div>
+
+        <div style={{ marginTop:12, fontSize:10, color:T.textFaint, textAlign:"center", lineHeight:1.6 }}>
+          A trilha divide sua meta em 5 estágios. Conforme seu provento médio cresce, os estágios vão sendo preenchidos com cores — do vermelho (início) ao azul (meta final).
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
 // PAINEL DE CONFIGURAÇÕES (engrenagem)
 // ════════════════════════════════════════════════════════════════════════════
 function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, onClose }) {
@@ -849,10 +1112,31 @@ export default function App() {
   const [fontEsc,  setFontEsc]  = useState(1);          // 0.85 | 1 | 1.15 | 1.35
   const [densidade,setDensidade]= useState("confortavel"); // "compacto" | "confortavel"
 
+  // ── META DE PROVENTOS (trilha de progressão) ────────────────────────────
+  const [metaMensal, setMetaMensal] = useState(500);    // meta de provento médio/mes
+  const [showMeta,   setShowMeta]   = useState(false);
+
   const T = TEMAS[temaId];
   const ehTV = layout === "tv";
-  // fator de escala global: TV aumenta tudo, + multiplicador de fonte do usuário
+  // fator de escala global: TV aumenta tudo, + multiplicador de fonte do usuario
   const escala = (ehTV ? 1.25 : 1) * fontEsc;
+
+  // ── ESCALA REAL via transform (funciona em qualquer navegador, inclusive preview) ──
+  // 'zoom' falha em alguns ambientes; transform:scale sempre funciona, mas nao reflui
+  // a altura — entao medimos o conteudo e reservamos o espaco vertical correto.
+  const escalaRef = useRef(null);
+  const [alturaEscalada, setAlturaEscalada] = useState(null);
+  useLayoutEffect(() => {
+    if (!escalaRef.current) return;
+    const medir = () => {
+      const h = escalaRef.current?.offsetHeight || 0;
+      setAlturaEscalada(escala === 1 ? null : h * escala);
+    };
+    medir();
+    // re-mede quando a janela muda de tamanho
+    window.addEventListener("resize", medir);
+    return () => window.removeEventListener("resize", medir);
+  });
 
   const listaFiltrada = filtro==="TUDO"?ativos:filtro==="FII"?ativos.filter(a=>a.cat==="FII"):ativos.filter(a=>a.cat==="Ação");
   const chartData = useMemo(()=>buildChart(ativos, filtro),[ativos, filtro]);
@@ -879,11 +1163,21 @@ export default function App() {
   return (
     <div style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:48,transition:"background 0.3s" }}>
 
-      {/* WRAPPER DE ESCALA — controla tamanho global (TV / fonte) */}
-      <div style={{ fontSize:`${escala*100}%`, maxWidth: ehTV ? 1100 : "none", margin:"0 auto" }}>
+      {/* WRAPPER DE ESCALA — transform:scale escala TUDO (px fixos inclusive).
+          A altura do container externo reserva o espaco do conteudo ja escalado,
+          para o scroll funcionar corretamente. */}
+      <div style={{ height: alturaEscalada || "auto", overflow: alturaEscalada ? "hidden" : "visible" }}>
+      <div ref={escalaRef} style={{
+        transform: escala !== 1 ? `scale(${escala})` : "none",
+        transformOrigin: "top center",
+        width: escala !== 1 ? `${100/escala}%` : "100%",
+        marginLeft: escala !== 1 ? `${-(100/escala - 100)/2}%` : 0,
+      }}>
+      {/* container interno centralizado para TV */}
+      <div style={{ maxWidth: ehTV ? 1100 : "none", margin:"0 auto" }}>
 
       {/* HEADER */}
-      <div style={{ background:T.bgHeader,padding:"16px 16px 16px",borderBottom:`1px solid ${T.border}` }}>
+      <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "12px 12px" : "16px 16px",borderBottom:`1px solid ${T.border}` }}>
         {/* linha superior: título + engrenagem */}
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10 }}>
           <div style={{ fontSize:10,color:T.accent,letterSpacing:2,textTransform:"uppercase",paddingTop:6 }}>
@@ -911,7 +1205,15 @@ export default function App() {
             </div>
           ))}
         </div>
+
+        {/* TRILHA DE METAS — progressão por estágios */}
+        <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} onConfigurar={()=>setShowMeta(true)} T={T} />
       </div>
+
+      {/* MODAL DEFINIR META */}
+      {showMeta && (
+        <ModalMeta metaMensal={metaMensal} setMetaMensal={setMetaMensal} valorAtual={mediaMes} onClose={()=>setShowMeta(false)} T={T} />
+      )}
 
       {/* PAINEL DE CONFIGURAÇÕES (modal) */}
       {showConfig && (
@@ -1015,7 +1317,9 @@ export default function App() {
         )}
       </div>
 
-      </div>{/* fim wrapper de escala */}
+      </div>{/* fim container TV center */}
+      </div>{/* fim escalaRef scale */}
+      </div>{/* fim container de altura */}
     </div>
   );
 }
