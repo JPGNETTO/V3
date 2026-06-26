@@ -1,7 +1,8 @@
-import { useState, useMemo, useRef, useLayoutEffect } from "react";
+import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell, Area, AreaChart
+  ResponsiveContainer, Cell, Area, AreaChart, ReferenceLine, ReferenceDot,
+  PieChart, Pie
 } from "recharts";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -97,11 +98,45 @@ function labelMes(offset) {
 const fmt  = v => v.toLocaleString("pt-BR", { style:"currency", currency:"BRL" });
 const fmtK = v => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : fmt(v);
 
+// Grupo de exibição (para listas agrupadas e expansíveis). NÃO altera o campo
+// 'cat' do ativo (que continua alimentando gráficos e filtros) — é só para exibir.
+function grupoDe(a) {
+  if (a.cat === "FII") return "FIIs";
+  if (a.cat === "Cripto") return "Cripto";
+  if (/^(BOVA11|BOVX11|IVVB11|SMAL11|HASH11|XINA11|NASD11)$/.test(a.ticker)) return "ETFs";
+  if (/tesouro|tesour/i.test(a.nome) || /^(LFT|LTN|NTN|TD)/.test(a.ticker)) return "Tesouro Direto";
+  return "Ações";
+}
+const ORDEM_GRUPOS = ["FIIs","Ações","ETFs","Cripto","Tesouro Direto","Outros"];
+const EMOJI_GRUPO = { "FIIs":"🏢","Ações":"📈","ETFs":"📊","Cripto":"🪙","Tesouro Direto":"🏛️","Outros":"📦" };
+const COR_GRUPO = (nome,T) => ({ "FIIs":T.cyan,"Ações":T.accent,"ETFs":"#f472b6","Cripto":T.amber,"Tesouro Direto":T.green,"Outros":T.textMute }[nome] || T.accent);
+
+
 const MESES_BASE = ["Jul/26","Ago/26","Set/26","Out/26","Nov/26","Dez/26","Jan/27","Fev/27","Mar/27","Abr/27","Mai/27","Jun/27"];
 
 // ════════════════════════════════════════════════════════════════════════════
 // DADOS INICIAIS DOS ATIVOS (editáveis na aba "Editar")
 // ════════════════════════════════════════════════════════════════════════════
+// Setor (subcategoria) de cada ativo — poucos grupos, fácil de ler
+const SETOR_TICKER = {
+  // Ações
+  BBAS3:"Bancos", BBDC3:"Bancos", SANB3:"Bancos", BRSR6:"Bancos", ITSA4:"Bancos", B3SA3:"Bancos",
+  BBSE3:"Seguradoras", CXSE3:"Seguradoras",
+  TAEE11:"Energia & Infra", CPLE3:"Energia & Infra", SBSP3:"Energia & Infra", WEGE3:"Energia & Infra", EMBJ3:"Energia & Infra",
+  PETR4:"Commodities", KLBN4:"Commodities", KLBN11:"Commodities",
+  // FIIs
+  VGHF11:"FII Papel", RBRY11:"FII Papel", CPTS11:"FII Papel", IRIM11:"FII Papel", KNCR11:"FII Papel", MXRF11:"FII Papel", RBRX11:"FII Papel",
+  MFII11:"FII Tijolo", TRXF11:"FII Tijolo", GARE11:"FII Tijolo", VISC11:"FII Tijolo", XPML11:"FII Tijolo", OIAG11:"FII Tijolo",
+  // Índice & Cripto
+  BOVA11:"Índice & Cripto", BOVX11:"Índice & Cripto", COIN11:"Índice & Cripto",
+};
+// Cor de cada setor (para gráficos do dashboard)
+const COR_SETOR = {
+  "Bancos":"#6366f1", "Seguradoras":"#a78bfa", "Energia & Infra":"#22d3ee",
+  "Commodities":"#fbbf24", "FII Papel":"#34d399", "FII Tijolo":"#2dd4bf",
+  "Índice & Cripto":"#f472b6", "Outros":"#64748b",
+};
+
 const ATIVOS_INICIAIS = [
   { ticker:"MFII11",nome:"Mérito Desenvolvimento",  cat:"FII", freq:"Mensal",    qtd:132,prov:1.06,precoMedio:52.69,cotacao:50.71,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
   { ticker:"VGHF11",nome:"Valora Hedge Fund",        cat:"FII", freq:"Mensal",    qtd:333,prov:0.07,precoMedio:6.05, cotacao:5.99, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
@@ -135,7 +170,50 @@ const ATIVOS_INICIAIS = [
   { ticker:"BOVA11",nome:"iShares Ibovespa", cat:"Ação",freq:"Semestral",  qtd:3,  prov:1.50,precoMedio:175.40,cotacao:168.21,meses:[1,7] },
   { ticker:"BOVX11",nome:"Trend Ibovespa",   cat:"Ação",freq:"Semestral",  qtd:3,  prov:0.15,precoMedio:20.12,cotacao:17.56,meses:[1,7] },
   { ticker:"COIN11",nome:"Hashdex Nasdaq Crypto",cat:"Cripto",freq:"Mensal", qtd:33, prov:0.00,precoMedio:38.70,cotacao:39.20,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-];
+].map(a => ({ ...a, setor: SETOR_TICKER[a.ticker] || "Outros" }));
+
+// ════════════════════════════════════════════════════════════════════════════
+// PERSISTÊNCIA — salva tudo na memória permanente do app (localStorage)
+// Funciona no APK. No preview do Claude o localStorage é bloqueado, então
+// envolvemos em try/catch: lá não salva, mas também não quebra.
+// ════════════════════════════════════════════════════════════════════════════
+const PREFIXO = "carteiraProventos_";
+
+function lerSalvo(chave, padrao) {
+  try {
+    const v = localStorage.getItem(PREFIXO + chave);
+    return v !== null ? JSON.parse(v) : padrao;
+  } catch { return padrao; }
+}
+function gravarSalvo(chave, valor) {
+  try { localStorage.setItem(PREFIXO + chave, JSON.stringify(valor)); } catch { /* preview: ignora */ }
+}
+
+// Hook: igual ao useState, mas grava automaticamente toda mudança na memória.
+function useEstadoSalvo(chave, padrao) {
+  const [valor, setValor] = useState(() => lerSalvo(chave, padrao));
+  useEffect(() => { gravarSalvo(chave, valor); }, [chave, valor]);
+  return [valor, setValor];
+}
+
+// Carrega os ativos salvos, mas SEMPRE inclui ativos novos que eu adicionar no
+// código no futuro (faz merge por ticker): suas edições são preservadas e os
+// ativos novos aparecem mesmo que você já tenha dados salvos.
+function carregarAtivos() {
+  const salvos = lerSalvo("ativos", null);
+  if (!Array.isArray(salvos)) return ATIVOS_INICIAIS.map(a => ({ ...a }));
+  const porTicker = {};
+  salvos.forEach(a => { if (a && a.ticker) porTicker[a.ticker] = a; });
+  // base = lista do código; aplica edições salvas por cima; adiciona tickers novos
+  const merge = ATIVOS_INICIAIS.map(base =>
+    porTicker[base.ticker]
+      ? { ...base, qtd:porTicker[base.ticker].qtd, prov:porTicker[base.ticker].prov,
+          precoMedio:porTicker[base.ticker].precoMedio, cotacao:porTicker[base.ticker].cotacao,
+          freq:porTicker[base.ticker].freq ?? base.freq, meses:porTicker[base.ticker].meses ?? base.meses }
+      : { ...base }
+  );
+  return merge;
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // FUNÇÕES DE CÁLCULO (recebem a lista de ativos como parâmetro)
@@ -155,7 +233,7 @@ function buildChart(ativos, filtro) {
   });
 }
 
-function simular(ativos, regras, horizonte, aporte) {
+function simular(ativos, regras, horizonte, aporte, aportesExtras = [], creditoCartao = 0) {
   const estado = ativos.map(a => ({ ...a }));
   let acum = 0;
   return Array.from({ length: horizonte }, (_, m) => {
@@ -168,9 +246,15 @@ function simular(ativos, regras, horizonte, aporte) {
         detalhes.push({ ticker: a.ticker, cat: a.cat, val: +v.toFixed(2) });
       }
     });
-    const caixaInicial = acum + provBrutoMes + aporte;
+    // aportes esporádicos que caem neste mês (13º, férias, venda de item, etc.)
+    const extrasMes = aportesExtras.filter(e => e.mes === m);
+    const extraValor = extrasMes.reduce((s,e)=>s+(+e.valor||0), 0);
+    // crédito do cartão garantido por ativos: injeção única no 1º mês (acelera a bola de neve)
+    const creditoMes = m === 0 ? creditoCartao : 0;
+    const caixaInicial = acum + provBrutoMes + aporte + extraValor + creditoMes;
     let caixa = caixaInicial;
     const compras = [];
+    let reinvestido = 0;
     regras.forEach(r => {
       if (r.pct <= 0) return;
       const ativo = estado.find(a => a.ticker === r.ticker);
@@ -180,18 +264,26 @@ function simular(ativos, regras, horizonte, aporte) {
       if (cotas > 0) {
         ativo.qtd += cotas;
         caixa -= cotas * cot;
+        reinvestido += cotas * cot;
         compras.push({ ticker: r.ticker, cotas, gasto: +(cotas*cot).toFixed(2) });
       }
     });
     acum = Math.max(caixa, 0);
     const patri = estado.reduce((s,a) => s + a.qtd*a.cotacao, 0);
     const provMedio = estado.reduce((s,a) => s + a.prov*a.qtd*a.meses.length/12, 0);
+    // limite de cartão (PLACEHOLDER): projeção de crédito usando ativos como garantia.
+    // Será refinado quando a aba de cartões for construída (ex: Tesouro como garantia).
+    const limiteCartao = patri * 0.40;
     return {
       mes: labelMes(m),
       provento: +provBrutoMes.toFixed(2),
       provMedio: +provMedio.toFixed(2),
       patrimonio: +patri.toFixed(2),
       caixa: +acum.toFixed(2),
+      limiteCartao: +limiteCartao.toFixed(2),
+      reinvestido: +reinvestido.toFixed(2),
+      aporteExtra: +extraValor.toFixed(2),
+      extrasMes,
       compras,
       detalhes: detalhes.sort((a,b)=>b.val-a.val),
     };
@@ -259,9 +351,16 @@ function Legenda({ ativos, T }) {
 }
 
 function DetalheMes({ ativos, idx, filtro, T }) {
+  const [abertos, setAbertos] = useState({});
   const lista = filtro==="TUDO" ? ativos : filtro==="FII" ? ativos.filter(a=>a.cat==="FII") : ativos.filter(a=>a.cat==="Ação");
   const pag = lista.filter(a=>mesesIdx(a.meses).includes(idx)).map(a=>({...a,total:+(a.prov*a.qtd).toFixed(2)})).sort((a,b)=>b.total-a.total);
   const total = pag.reduce((s,a)=>s+a.total,0);
+
+  // agrupa por categoria de exibição
+  const grupos = {};
+  pag.forEach(a => { const g = grupoDe(a); (grupos[g] = grupos[g] || []).push(a); });
+  const ordenados = ORDEM_GRUPOS.filter(g => grupos[g]);
+
   return (
     <div>
       <div style={{ display:"flex",alignItems:"baseline",gap:8,marginBottom:10 }}>
@@ -270,19 +369,51 @@ function DetalheMes({ ativos, idx, filtro, T }) {
       </div>
       {pag.length===0
         ? <div style={{ fontSize:12,color:T.textFaint,textAlign:"center",padding:"16px 0" }}>Nenhum provento neste mês</div>
-        : pag.map(a=>{
-          const c = corDe(a.ticker,a.cat,T);
+        : ordenados.map(g=>{
+          const itens = grupos[g];
+          const cg = COR_GRUPO(g,T);
+          const aberto = abertos[g];
+          const subtotal = itens.reduce((s,a)=>s+a.total,0);
+          const patri = itens.reduce((s,a)=>s+a.qtd*a.cotacao,0);
           return (
-            <div key={a.ticker} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:`${c}0d`,border:`1px solid ${c}33`,borderLeft:`3px solid ${c}`,borderRadius:8,padding:"8px 12px",marginBottom:5 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:7 }}>
-                <div style={{ width:8,height:8,borderRadius:2,background:c }}/>
-                <div>
-                  <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
-                  <span style={{ fontSize:9,color:T.textFaint,background:T.border,padding:"1px 5px",borderRadius:4,marginLeft:6 }}>{a.freq}</span>
-                  <div style={{ fontSize:10,color:T.textFaint,marginTop:1 }}>{a.nome} · {a.qtd}× R${a.prov.toFixed(2)}</div>
+            <div key={g} style={{ marginBottom:6 }}>
+              {/* linha do grupo (clicável) */}
+              <div onClick={()=>setAbertos(p=>({ ...p, [g]:!p[g] }))} style={{
+                display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer",
+                background:`${cg}10`, border:`1px solid ${cg}33`, borderLeft:`3px solid ${cg}`,
+                borderRadius:8, padding:"9px 12px"
+              }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:10, color:T.textFaint, transform:aberto?"rotate(90deg)":"none", transition:"transform 0.2s", display:"inline-block" }}>▶</span>
+                  <span style={{ fontSize:13 }}>{EMOJI_GRUPO[g]}</span>
+                  <div>
+                    <span style={{ fontSize:12, fontWeight:800, color:T.text }}>{g}</span>
+                    <div style={{ fontSize:9, color:T.textFaint }}>{itens.length} ativo{itens.length>1?"s":""} · {fmt(patri)} em carteira</div>
+                  </div>
                 </div>
+                <div style={{ fontSize:13, fontWeight:800, color:cg }}>{fmt(subtotal)}</div>
               </div>
-              <div style={{ fontSize:13,fontWeight:800,color:c }}>{fmt(a.total)}</div>
+              {/* itens do grupo */}
+              {aberto && (
+                <div style={{ paddingLeft:6, marginTop:5 }}>
+                  {itens.map(a=>{
+                    const c = corDe(a.ticker,a.cat,T);
+                    return (
+                      <div key={a.ticker} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:`${c}0d`,border:`1px solid ${c}33`,borderLeft:`3px solid ${c}`,borderRadius:8,padding:"8px 12px",marginBottom:5 }}>
+                        <div style={{ display:"flex",alignItems:"center",gap:7 }}>
+                          <div style={{ width:8,height:8,borderRadius:2,background:c }}/>
+                          <div>
+                            <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
+                            <span style={{ fontSize:9,color:T.textFaint,background:T.border,padding:"1px 5px",borderRadius:4,marginLeft:6 }}>{a.freq}</span>
+                            <div style={{ fontSize:10,color:T.textFaint,marginTop:1 }}>{a.nome} · {a.qtd}× R${a.prov.toFixed(2)}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize:13,fontWeight:800,color:c }}>{fmt(a.total)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })
@@ -291,34 +422,582 @@ function DetalheMes({ ativos, idx, filtro, T }) {
   );
 }
 
-function Ranking({ ativos, T }) {
-  const ranked = ativos.map(a=>({...a,ano:+(mesesIdx(a.meses).length*a.prov*a.qtd).toFixed(2)})).filter(a=>a.ano>0).sort((a,b)=>b.ano-a.ano);
-  const total = ranked.reduce((s,a)=>s+a.ano,0); const max = ranked[0]?.ano||1;
+// ════════════════════════════════════════════════════════════════════════════
+// DASHBOARD DA CARTEIRA — composição (pizza) + dinheiro (barras), por grupo
+// ════════════════════════════════════════════════════════════════════════════
+function PainelCarteira({ ativos, historico = [], T }) {
+  const [agrupar, setAgrupar] = useState("cat");   // "cat" | "setor"
+  const [metrica, setMetrica] = useState("atual"); // "atual" | "investido"
+  const [filtroCat, setFiltroCat] = useState("TUDO"); // "TUDO" | "FII" | "Ação" | "Cripto"
+
+  // cores por categoria
+  const corCat = { "FII":T.cyan, "Ação":T.accent, "Cripto":T.amber };
+
+  // aplica filtro de categoria
+  const lista = filtroCat==="TUDO" ? ativos : ativos.filter(a=>a.cat===filtroCat);
+
+  // agrupa e soma
+  const grupos = {};
+  lista.forEach(a => {
+    const chave = agrupar==="cat" ? a.cat : a.setor;
+    const atual = a.qtd * a.cotacao;
+    const investido = a.qtd * a.precoMedio;
+    if (!grupos[chave]) grupos[chave] = { nome:chave, atual:0, investido:0, qtdAtivos:0 };
+    grupos[chave].atual += atual;
+    grupos[chave].investido += investido;
+    grupos[chave].qtdAtivos += 1;
+  });
+  const arr = Object.values(grupos)
+    .map(g => ({ ...g, valor: metrica==="atual"?g.atual:g.investido, resultado:g.atual-g.investido }))
+    .sort((a,b)=>b.valor-a.valor);
+
+  const totalAtual = lista.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  const totalInvest = lista.reduce((s,a)=>s+a.qtd*a.precoMedio,0);
+  const totalMetrica = metrica==="atual"?totalAtual:totalInvest;
+  const resultadoGeral = totalAtual-totalInvest;
+
+  const corGrupo = (nome) => agrupar==="cat" ? (corCat[nome]||T.accent) : (COR_SETOR[nome]||T.textMute);
+
+  const pieData = arr.map(g => ({ name:g.nome, value:+g.valor.toFixed(2), cor:corGrupo(g.nome) }));
+  const maxBar = Math.max(...arr.map(g=>g.valor), 1);
+
+  const FILTROS_CAT = [
+    { id:"TUDO", label:"Tudo" },
+    { id:"FII",  label:"FIIs" },
+    { id:"Ação", label:"Ações" },
+    { id:"Cripto",label:"Cripto" },
+  ];
+
+  const [vista, setVista] = useState("resumo"); // "resumo" | "composicao" | "historico"
+  const MINI = [
+    { id:"resumo",     label:"Resumo",     emoji:"👁️" },
+    { id:"composicao", label:"Composição", emoji:"🥧" },
+    { id:"historico",  label:"Histórico",  emoji:"🕒" },
+  ];
+
   return (
     <div>
-      <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:12 }}>Ranking anual · {fmt(total)}</div>
-      {ranked.map((a,i)=>{
-        const c = corDe(a.ticker,a.cat,T);
+      {/* SAUDAÇÃO + DATA + DESTAQUE DO DIA */}
+      {(() => {
+        const hoje = new Date();
+        const h = hoje.getHours();
+        const saud = h<12 ? "Bom dia" : h<18 ? "Boa tarde" : "Boa noite";
+        const NOMES_MES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+        const dataFmt = `${hoje.getDate()} de ${NOMES_MES[hoje.getMonth()]}`;
+        const mAtual = hoje.getMonth()+1;
+
+        // candidatos a destaque do dia
+        const candidatos = [];
+        const pagadores = ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(mAtual)).map(a=>({t:a.ticker, v:a.prov*a.qtd})).sort((x,y)=>y.v-x.v);
+        if (pagadores[0]) candidatos.push({ icon:"💰", txt:`Seu maior pagador este mês é o ${pagadores[0].t} (${fmt(pagadores[0].v)})` });
+        let magicProx=null;
+        ativos.forEach(a=>{
+          const pm=a.prov*(a.meses.length/12);
+          if(pm>0 && a.cotacao>0){ const magic=Math.ceil(a.cotacao/pm); const faltam=magic-a.qtd;
+            if(faltam>0 && (!magicProx||faltam<magicProx.faltam)) magicProx={t:a.ticker, faltam}; }
+        });
+        if (magicProx && magicProx.faltam<=15) candidatos.push({ icon:"✨", txt:`Você está a ${magicProx.faltam} cota${magicProx.faltam>1?"s":""} do Magic Number do ${magicProx.t}!` });
+        const patri = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+        const porA = ativos.map(a=>({t:a.ticker, v:a.qtd*a.cotacao})).sort((x,y)=>y.v-x.v);
+        if (porA[0] && patri>0) { const cc=porA[0].v/patri*100;
+          if (cc>30) candidatos.push({ icon:"⚖️", txt:`${porA[0].t} já é ${cc.toFixed(0)}% da carteira — talvez diversificar.` });
+        }
+        const totProx = ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(mAtual===12?1:mAtual+1)).reduce((s,a)=>s+a.prov*a.qtd,0);
+        if (totProx>0) candidatos.push({ icon:"📅", txt:`No próximo mês você deve receber cerca de ${fmt(totProx)}.` });
+        if (candidatos.length===0) candidatos.push({ icon:"🌱", txt:"Cadastre seus ativos para ver destaques personalizados." });
+        // varia o destaque conforme o dia
+        const destaque = candidatos[hoje.getDate() % candidatos.length];
+
         return (
-          <div key={a.ticker} style={{ marginBottom:9 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:7 }}>
-                <span style={{ fontSize:10,color:T.textFaint,fontWeight:700,minWidth:18 }}>#{i+1}</span>
-                <div style={{ width:9,height:9,borderRadius:2,background:c }}/>
-                <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
-                <span style={{ fontSize:9,color:T.textFaint,background:T.border,padding:"1px 5px",borderRadius:4 }}>{a.freq}</span>
-              </div>
-              <span style={{ fontSize:12,fontWeight:800,color:c }}>{fmt(a.ano)}</span>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
+              <span style={{ fontSize:15, fontWeight:800, color:T.text }}>{saud}! 👋</span>
+              <span style={{ fontSize:11, color:T.textFaint }}>{dataFmt}</span>
             </div>
-            <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-              <div style={{ flex:1,height:5,background:T.border,borderRadius:4,overflow:"hidden" }}>
-                <div style={{ height:"100%",width:`${(a.ano/max)*100}%`,background:c,borderRadius:4 }}/>
+            <div style={{ background:`linear-gradient(135deg, ${T.amber}1c, ${T.card})`, border:`1px solid ${T.amber}44`, borderRadius:12, padding:"11px 13px", display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:20 }}>{destaque.icon}</span>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:8, color:T.amber, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>Destaque do dia</div>
+                <div style={{ fontSize:12, color:T.text, fontWeight:600, lineHeight:1.3 }}>{destaque.txt}</div>
               </div>
-              <span style={{ fontSize:9,color:T.textFaint,minWidth:32,textAlign:"right" }}>{((a.ano/total)*100).toFixed(1)}%</span>
             </div>
           </div>
         );
+      })()}
+
+      {/* mini-abas internas do Painel */}
+      <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:14 }}>
+        {MINI.map(m=>{
+          const sel = vista===m.id;
+          return (
+            <button key={m.id} onClick={()=>setVista(m.id)} style={{ flex:1, padding:"8px 4px", borderRadius:7, border:"none", cursor:"pointer", fontSize:11, fontWeight:700, background:sel?T.accentBg:"transparent", color:sel?T.accentSoft:T.textMute }}>
+              {m.emoji} {m.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ═══ VISTA: RESUMO ═══ */}
+      {vista==="resumo" && (<>
+      {/* PRÓXIMOS PROVENTOS — mês atual e próximo (estimado pelas datas) */}
+      {(() => {
+        const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+        const hoje = new Date();
+        const mAtual = hoje.getMonth()+1;          // 1-12
+        const mProx  = mAtual===12 ? 1 : mAtual+1;
+        const provDoMes = (m) => ativos
+          .filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m))
+          .map(a=>({ ticker:a.ticker, cat:a.cat, valor:+(a.prov*a.qtd).toFixed(2) }))
+          .sort((x,y)=>y.valor-x.valor);
+        const esteList = provDoMes(mAtual);
+        const proxList = provDoMes(mProx);
+        const esteTot = esteList.reduce((s,p)=>s+p.valor,0);
+        const proxTot = proxList.reduce((s,p)=>s+p.valor,0);
+        return (
+          <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+            {/* este mês */}
+            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.green}22, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"13px 14px" }}>
+              <div style={{ fontSize:9, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>📥 Este mês</div>
+              <div style={{ fontSize:9, color:T.textFaint, marginBottom:3 }}>{NOMES_MES[mAtual-1]}</div>
+              <div style={{ fontSize:20, fontWeight:800, color:T.green, letterSpacing:-0.5 }}>{fmt(esteTot)}</div>
+              <div style={{ fontSize:9, color:T.textMute, marginTop:2 }}>{esteList.length} ativo{esteList.length!==1?"s":""} pagando</div>
+            </div>
+            {/* próximo mês */}
+            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.accent}44`, borderRadius:14, padding:"13px 14px" }}>
+              <div style={{ fontSize:9, color:T.accentSoft, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>📅 Próximo mês</div>
+              <div style={{ fontSize:9, color:T.textFaint, marginBottom:3 }}>{NOMES_MES[mProx-1]}</div>
+              <div style={{ fontSize:20, fontWeight:800, color:T.accentSoft, letterSpacing:-0.5 }}>{fmt(proxTot)}</div>
+              <div style={{ fontSize:9, color:T.textMute, marginTop:2 }}>{proxList.length} ativo{proxList.length!==1?"s":""} pagando</div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* PROVENTOS MÊS A MÊS — gráfico compacto no contexto da home */}
+      {(() => {
+        const dataMes = MESES_BASE.map((label,idx)=>({
+          mes: label.slice(0,3),
+          total: +ativos.filter(a=>a.qtd>0 && mesesIdx(a.meses).includes(idx)).reduce((s,a)=>s+a.prov*a.qtd,0).toFixed(2)
+        }));
+        const temDados = dataMes.some(d=>d.total>0);
+        if (!temDados) return null;
+        return (
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 8px", marginBottom:12 }}>
+            <div style={{ paddingLeft:8, marginBottom:8, fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>💵 Proventos mês a mês</div>
+            <div style={{ width:"100%", height:150 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dataMes} margin={{ top:4,right:8,left:0,bottom:0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
+                  <XAxis dataKey="mes" tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} interval={0}/>
+                  <YAxis tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} width={38} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${Math.round(v)}`}/>
+                  <Tooltip formatter={(v)=>fmt(v)} contentStyle={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:8, fontSize:12 }} cursor={{ fill:`${T.accent}11` }}/>
+                  <Bar dataKey="total" radius={[4,4,0,0]} fill={T.cyan}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ fontSize:9, color:T.textFaint, padding:"4px 10px 0" }}>Visão completa e detalhada na tela 📈 Gráfico.</div>
+          </div>
+        );
+      })()}
+
+      {/* resumo geral */}
+      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:12 }}>
+        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Patrimônio atual</div>
+        <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(totalAtual)}</div>
+        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Investido</div>
+            <div style={{ fontSize:11, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
+          </div>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Resultado</div>
+            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
+          </div>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Rentab.</div>
+            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
+          </div>
+        </div>
+      </div>
+
+      </>)}
+
+      {/* ═══ VISTA: HISTÓRICO ═══ */}
+      {vista==="historico" && (
+        historico.length>0 ? (
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 12px", marginBottom:12 }}>
+          <div style={{ paddingLeft:8, marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>🕒 Histórico real</div>
+            <span style={{ fontSize:9, color:T.textFaint }}>{historico.length} mês{historico.length>1?"es":""} registrado{historico.length>1?"s":""}</span>
+          </div>
+          {historico.length===1 ? (
+            <div style={{ fontSize:10, color:T.textFaint, padding:"8px 12px", lineHeight:1.6 }}>
+              📸 Primeiro retrato guardado! O app grava a evolução do seu patrimônio automaticamente a cada mês. Volte nos próximos meses para ver a linha crescer.
+            </div>
+          ) : (
+            <div style={{ width:"100%", height:180 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={historico.map(h=>({ mes:h.mes.slice(5)+"/"+h.mes.slice(2,4), patrimonio:h.patrimonio }))} margin={{ top:8,right:12,left:0,bottom:0 }}>
+                  <defs>
+                    <linearGradient id="gradHist" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={T.accent} stopOpacity={0.4}/>
+                      <stop offset="100%" stopColor={T.accent} stopOpacity={0.02}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
+                  <XAxis dataKey="mes" tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} width={42}
+                    tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${Math.round(v)}`}/>
+                  <Tooltip formatter={(v)=>fmt(v)} contentStyle={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:8, fontSize:12 }}/>
+                  <Area type="monotone" dataKey="patrimonio" name="Patrimônio" stroke={T.accent} strokeWidth={2.5} fill="url(#gradHist)" dot={{ r:3, fill:T.accent }}/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div style={{ fontSize:9, color:T.textFaint, padding:"4px 12px 0", lineHeight:1.5 }}>
+            Diferente das projeções: aqui é o valor real registrado a cada mês conforme você usa o app e atualiza as cotações.
+          </div>
+        </div>
+        ) : (
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"24px 16px", textAlign:"center" }}>
+            <div style={{ fontSize:28, marginBottom:6 }}>🕒</div>
+            <div style={{ fontSize:12, color:T.textMute, lineHeight:1.6 }}>O histórico começa a ser gravado automaticamente. Volte nos próximos meses para ver a evolução real do seu patrimônio.</div>
+          </div>
+        )
+      )}
+
+      {/* ═══ VISTA: COMPOSIÇÃO ═══ */}
+      {vista==="composicao" && (<>
+      {/* controles */}
+      <div style={{ display:"flex", gap:6, marginBottom:8, flexWrap:"wrap" }}>
+        {FILTROS_CAT.map(f=>(
+          <button key={f.id} onClick={()=>setFiltroCat(f.id)} style={{
+            padding:"6px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
+            background:filtroCat===f.id?T.accent:T.border, color:filtroCat===f.id?"#fff":T.textMute
+          }}>{f.label}</button>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        <div style={{ flex:1, display:"flex", gap:4, background:T.card, borderRadius:8, padding:3 }}>
+          {[{id:"cat",l:"Por categoria"},{id:"setor",l:"Por setor"}].map(o=>(
+            <button key={o.id} onClick={()=>setAgrupar(o.id)} style={{ flex:1, padding:"6px 4px", borderRadius:6, border:"none", cursor:"pointer", fontSize:10, fontWeight:700, background:agrupar===o.id?T.accentBg:"transparent", color:agrupar===o.id?T.accentSoft:T.textMute }}>{o.l}</button>
+          ))}
+        </div>
+        <div style={{ flex:1, display:"flex", gap:4, background:T.card, borderRadius:8, padding:3 }}>
+          {[{id:"atual",l:"Valor atual"},{id:"investido",l:"Investido"}].map(o=>(
+            <button key={o.id} onClick={()=>setMetrica(o.id)} style={{ flex:1, padding:"6px 4px", borderRadius:6, border:"none", cursor:"pointer", fontSize:10, fontWeight:700, background:metrica===o.id?T.accentBg:"transparent", color:metrica===o.id?T.accentSoft:T.textMute }}>{o.l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* PIZZA — composição */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>
+          Composição {agrupar==="cat"?"por categoria":"por setor"}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+          <div style={{ width:160, height:160, flexShrink:0, margin:"0 auto" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={42} outerRadius={72} paddingAngle={2} stroke="none">
+                  {pieData.map((e,i)=><Cell key={i} fill={e.cor}/>)}
+                </Pie>
+                <Tooltip formatter={(v)=>fmt(v)} contentStyle={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:8, fontSize:12 }}/>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{ flex:1, minWidth:140 }}>
+            {arr.map(g=>{
+              const pct = totalMetrica>0 ? (g.valor/totalMetrica)*100 : 0;
+              return (
+                <div key={g.nome} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                  <div style={{ width:10, height:10, borderRadius:3, background:corGrupo(g.nome), flexShrink:0 }}/>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between" }}>
+                      <span style={{ fontSize:11, color:T.textDim, fontWeight:600 }}>{g.nome}</span>
+                      <span style={{ fontSize:11, color:T.text, fontWeight:700 }}>{pct.toFixed(1)}%</span>
+                    </div>
+                    <div style={{ fontSize:9, color:T.textFaint }}>{fmt(g.valor)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* BARRAS — dinheiro por grupo */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:12, textTransform:"uppercase", letterSpacing:1 }}>
+          {metrica==="atual"?"Valor atual":"Investido"} por {agrupar==="cat"?"categoria":"setor"}
+        </div>
+        {arr.map(g=>{
+          const pct = (g.valor/maxBar)*100;
+          return (
+            <div key={g.nome} style={{ marginBottom:10 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                <span style={{ fontSize:11, color:T.textDim, fontWeight:600 }}>{g.nome} <span style={{ fontSize:9, color:T.textFaint }}>· {g.qtdAtivos} ativo{g.qtdAtivos>1?"s":""}</span></span>
+                <div style={{ textAlign:"right" }}>
+                  <span style={{ fontSize:11, color:T.text, fontWeight:700 }}>{fmt(g.valor)}</span>
+                  <span style={{ fontSize:9, color:g.resultado>=0?T.green:T.red, marginLeft:6 }}>{g.resultado>=0?"+":""}{fmtK(g.resultado)}</span>
+                </div>
+              </div>
+              <div style={{ height:8, background:T.cardAlt, borderRadius:5, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${pct}%`, background:corGrupo(g.nome), borderRadius:5, transition:"width 0.4s" }}/>
+              </div>
+            </div>
+          );
+        })}
+        {arr.length===0 && <div style={{ fontSize:11, color:T.textFaint, textAlign:"center", padding:"16px 0" }}>Nenhum ativo neste filtro</div>}
+      </div>
+      </>)}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ANÁLISE DA CARTEIRA — yield, saúde, benchmarks (usada na aba Análises)
+// ════════════════════════════════════════════════════════════════════════════
+function AnaliseCarteira({ ativos, T }) {
+  const todos = ativos;
+  const patri = todos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  const investido = todos.reduce((s,a)=>s+a.qtd*a.precoMedio,0);
+  const divAnual = todos.reduce((s,a)=>s+a.prov*a.meses.length*a.qtd,0);
+  const yieldAtual = patri>0 ? divAnual/patri*100 : 0;
+  const yieldCusto = investido>0 ? divAnual/investido*100 : 0;
+  const porAtivo = todos.map(a=>({ ticker:a.ticker, v:a.qtd*a.cotacao })).sort((x,y)=>y.v-x.v);
+  const maior = porAtivo[0];
+  const concentracao = patri>0 && maior ? maior.v/patri*100 : 0;
+  const nAtivos = todos.filter(a=>a.qtd>0).length;
+  const CDI=10.5, POUP=6.2;
+  const alertaConc = concentracao>30;
+  const alertaPoucos = nAtivos<5;
+  return (
+    <>
+      {/* yields */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+        <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>📈 Rendimento da carteira</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Yield atual (s/ cotação)</div>
+            <div style={{ fontSize:17, fontWeight:800, color:T.cyan }}>{yieldAtual.toFixed(2)}%<span style={{ fontSize:9, color:T.textFaint, fontWeight:600 }}>/ano</span></div>
+          </div>
+          <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Yield on cost (s/ p. médio)</div>
+            <div style={{ fontSize:17, fontWeight:800, color:T.green }}>{yieldCusto.toFixed(2)}%<span style={{ fontSize:9, color:T.textFaint, fontWeight:600 }}>/ano</span></div>
+          </div>
+        </div>
+        <div style={{ marginTop:10 }}>
+          {[
+            { nome:"Sua carteira", v:yieldAtual, cor:T.cyan },
+            { nome:"CDI (ref.)",   v:CDI,        cor:T.amber },
+            { nome:"Poupança (ref.)", v:POUP,    cor:T.textMute },
+          ].map(b=>{
+            const max = Math.max(yieldAtual, CDI, POUP, 1);
+            return (
+              <div key={b.nome} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
+                <span style={{ fontSize:10, color:T.textDim, minWidth:96 }}>{b.nome}</span>
+                <div style={{ flex:1, height:7, background:T.cardAlt, borderRadius:4, overflow:"hidden" }}>
+                  <div style={{ height:"100%", width:`${b.v/max*100}%`, background:b.cor, borderRadius:4 }}/>
+                </div>
+                <span style={{ fontSize:10, fontWeight:700, color:b.cor, minWidth:42, textAlign:"right" }}>{b.v.toFixed(1)}%</span>
+              </div>
+            );
+          })}
+          <div style={{ fontSize:8, color:T.textFaint, marginTop:4 }}>CDI/Poupança são referências aproximadas (~jun/2026). Compara só o rendimento em dividendos — não inclui valorização das cotas.</div>
+        </div>
+      </div>
+
+      {/* saúde / diversificação */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+        <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🩺 Saúde da carteira</div>
+        <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
+          <div style={{ flex:1, minWidth:100, background:T.cardAlt, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Nº de ativos</div>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text }}>{nAtivos}</div>
+          </div>
+          <div style={{ flex:1, minWidth:100, background:T.cardAlt, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Maior posição</div>
+            <div style={{ fontSize:16, fontWeight:800, color:alertaConc?T.red:T.green }}>{concentracao.toFixed(0)}%</div>
+            <div style={{ fontSize:8, color:T.textFaint }}>{maior?.ticker}</div>
+          </div>
+        </div>
+        {alertaConc && (
+          <div style={{ background:`${T.red}12`, border:`1px solid ${T.red}44`, borderRadius:8, padding:"8px 10px", marginBottom:6 }}>
+            <span style={{ fontSize:10, color:T.red }}>⚠️ <strong>{maior.ticker}</strong> concentra {concentracao.toFixed(0)}% da carteira. Concentração acima de 30% aumenta o risco.</span>
+          </div>
+        )}
+        {alertaPoucos && (
+          <div style={{ background:`${T.amber}12`, border:`1px solid ${T.amber}44`, borderRadius:8, padding:"8px 10px", marginBottom:6 }}>
+            <span style={{ fontSize:10, color:T.amber }}>💡 Poucos ativos ({nAtivos}). Diversificar mais reduz o risco de depender de um só.</span>
+          </div>
+        )}
+        {!alertaConc && !alertaPoucos && (
+          <div style={{ background:`${T.green}12`, border:`1px solid ${T.green}44`, borderRadius:8, padding:"8px 10px" }}>
+            <span style={{ fontSize:10, color:T.green }}>✓ Boa diversificação — nenhuma posição domina a carteira.</span>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CALENDÁRIO DE PROVENTOS — 12 meses, quanto cada mês paga e quais ativos
+// ════════════════════════════════════════════════════════════════════════════
+function Calendario({ ativos, T }) {
+  const [mesAberto, setMesAberto] = useState(null);
+  // monta os 12 meses (base Jul/26 → Jun/27)
+  const meses = MESES_BASE.map((label, idx) => {
+    const pagantes = ativos
+      .filter(a => a.qtd>0 && a.prov>0 && mesesIdx(a.meses).includes(idx))
+      .map(a => ({ ticker:a.ticker, cat:a.cat, valor:+(a.prov*a.qtd).toFixed(2) }))
+      .sort((x,y)=>y.valor-x.valor);
+    const total = pagantes.reduce((s,p)=>s+p.valor,0);
+    return { idx, label, pagantes, total };
+  });
+  const maxMes = Math.max(...meses.map(m=>m.total), 1);
+  const totalAno = meses.reduce((s,m)=>s+m.total,0);
+  const mesAtualIdx = meses.reduce((best,m,i)=> m.total>meses[best].total ? i : best, 0);
+
+  return (
+    <div>
+      <div style={{ background:`linear-gradient(135deg, ${T.cyan}1c, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 16px", marginBottom:12 }}>
+        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>📅 Calendário de proventos · 12 meses</div>
+        <div style={{ fontSize:24, fontWeight:800, color:T.text }}>{fmt(totalAno)}<span style={{ fontSize:12, color:T.textFaint, fontWeight:600 }}>/ano</span></div>
+        <div style={{ fontSize:10, color:T.textMute, marginTop:2 }}>Maior mês: <strong style={{ color:T.green }}>{meses[mesAtualIdx].label}</strong> ({fmt(meses[mesAtualIdx].total)})</div>
+      </div>
+
+      {meses.map(m=>{
+        const aberto = mesAberto===m.idx;
+        const pct = m.total/maxMes*100;
+        return (
+          <div key={m.idx} style={{ marginBottom:6 }}>
+            <div onClick={()=>setMesAberto(aberto?null:m.idx)} style={{ cursor:"pointer", background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 13px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:10, color:T.textFaint, transform:aberto?"rotate(90deg)":"none", transition:"transform 0.2s", display:"inline-block" }}>▶</span>
+                  <span style={{ fontSize:13, fontWeight:700, color:T.text }}>{m.label}</span>
+                  <span style={{ fontSize:9, color:T.textFaint }}>{m.pagantes.length} ativo{m.pagantes.length!==1?"s":""}</span>
+                </div>
+                <span style={{ fontSize:13, fontWeight:800, color: m.total>0?T.green:T.textFaint }}>{m.total>0?fmt(m.total):"—"}</span>
+              </div>
+              <div style={{ height:6, background:T.cardAlt, borderRadius:4, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${pct}%`, background:T.green, borderRadius:4 }}/>
+              </div>
+            </div>
+            {aberto && m.pagantes.length>0 && (
+              <div style={{ paddingLeft:6, marginTop:5 }}>
+                {m.pagantes.map(p=>{
+                  const c = corDe(p.ticker, p.cat, T);
+                  return (
+                    <div key={p.ticker} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:`${c}0d`, borderLeft:`3px solid ${c}`, borderRadius:7, padding:"7px 11px", marginBottom:4 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                        <div style={{ width:8, height:8, borderRadius:2, background:c }}/>
+                        <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{p.ticker}</span>
+                      </div>
+                      <span style={{ fontSize:12, fontWeight:700, color:c }}>{fmt(p.valor)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
       })}
+      <div style={{ fontSize:9, color:T.textFaint, marginTop:8, textAlign:"center", lineHeight:1.5 }}>
+        Baseado na frequência cadastrada de cada ativo. Datas exatas (data-com/pagamento) viriam da integração com API no futuro.
+      </div>
+    </div>
+  );
+}
+
+function Ranking({ ativos, T }) {
+  const [modo, setModo] = useState("proventos"); // "proventos" | "valorizacao"
+
+  // PROVENTOS: ranking anual
+  const rankedProv = ativos.map(a=>({...a,ano:+(mesesIdx(a.meses).length*a.prov*a.qtd).toFixed(2)})).filter(a=>a.ano>0).sort((a,b)=>b.ano-a.ano);
+  const totalProv = rankedProv.reduce((s,a)=>s+a.ano,0); const maxProv = rankedProv[0]?.ano||1;
+
+  // VALORIZAÇÃO: ganho/perda desde o preço médio
+  const rankedVal = ativos.map(a=>{
+    const pctVal = a.precoMedio>0 ? ((a.cotacao-a.precoMedio)/a.precoMedio)*100 : 0;
+    const ganho = (a.cotacao-a.precoMedio)*a.qtd;
+    return {...a, pctVal:+pctVal.toFixed(2), ganho:+ganho.toFixed(2)};
+  }).sort((a,b)=>b.pctVal-a.pctVal);
+  const maxAbsVal = Math.max(...rankedVal.map(a=>Math.abs(a.pctVal)),1);
+
+  return (
+    <div>
+      {/* toggle proventos / valorização */}
+      <div style={{ display:"flex", gap:4, background:T.card, borderRadius:10, padding:3, marginBottom:14 }}>
+        {[{id:"proventos",l:"💰 Proventos"},{id:"valorizacao",l:"📈 Valorização"}].map(o=>(
+          <button key={o.id} onClick={()=>setModo(o.id)} style={{ flex:1, padding:"8px 4px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:modo===o.id?T.accent:"transparent", color:modo===o.id?"#fff":T.textMute }}>{o.l}</button>
+        ))}
+      </div>
+
+      {modo==="proventos" ? (
+        <>
+          <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:12 }}>Ranking anual de proventos · {fmt(totalProv)}</div>
+          {rankedProv.map((a,i)=>{
+            const c = corDe(a.ticker,a.cat,T);
+            return (
+              <div key={a.ticker} style={{ marginBottom:9 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:7 }}>
+                    <span style={{ fontSize:10,color:T.textFaint,fontWeight:700,minWidth:18 }}>#{i+1}</span>
+                    <div style={{ width:9,height:9,borderRadius:2,background:c }}/>
+                    <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
+                    <span style={{ fontSize:9,color:T.textFaint,background:T.border,padding:"1px 5px",borderRadius:4 }}>{a.freq}</span>
+                  </div>
+                  <span style={{ fontSize:12,fontWeight:800,color:c }}>{fmt(a.ano)}</span>
+                </div>
+                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <div style={{ flex:1,height:5,background:T.border,borderRadius:4,overflow:"hidden" }}>
+                    <div style={{ height:"100%",width:`${(a.ano/maxProv)*100}%`,background:c,borderRadius:4 }}/>
+                  </div>
+                  <span style={{ fontSize:9,color:T.textFaint,minWidth:32,textAlign:"right" }}>{((a.ano/totalProv)*100).toFixed(1)}%</span>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>Valorização desde o preço médio</div>
+          <div style={{ fontSize:10,color:T.textFaint,marginBottom:12,lineHeight:1.5 }}>Quanto cada ativo subiu ou caiu em relação ao que você pagou. Atualize as cotações na aba Editar para acompanhar mês a mês.</div>
+          {rankedVal.map((a,i)=>{
+            const pos = a.pctVal>=0;
+            const cor = pos?T.green:T.red;
+            return (
+              <div key={a.ticker} style={{ marginBottom:9 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:7 }}>
+                    <span style={{ fontSize:10,color:T.textFaint,fontWeight:700,minWidth:18 }}>#{i+1}</span>
+                    <div style={{ width:9,height:9,borderRadius:2,background:corDe(a.ticker,a.cat,T) }}/>
+                    <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
+                    <span style={{ fontSize:9,color:T.textFaint }}>R${a.precoMedio.toFixed(2)}→R${a.cotacao.toFixed(2)}</span>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <span style={{ fontSize:12,fontWeight:800,color:cor }}>{pos?"+":""}{a.pctVal.toFixed(1)}%</span>
+                    <div style={{ fontSize:9,color:cor }}>{pos?"+":""}{fmtK(a.ganho)}</div>
+                  </div>
+                </div>
+                {/* barra divergente: centro = 0 */}
+                <div style={{ display:"flex",alignItems:"center",height:6 }}>
+                  <div style={{ flex:1,display:"flex",justifyContent:"flex-end" }}>
+                    {!pos && <div style={{ height:6,width:`${(Math.abs(a.pctVal)/maxAbsVal)*100}%`,background:T.red,borderRadius:"4px 0 0 4px" }}/>}
+                  </div>
+                  <div style={{ width:1,height:10,background:T.borderSoft }}/>
+                  <div style={{ flex:1 }}>
+                    {pos && <div style={{ height:6,width:`${(a.pctVal/maxAbsVal)*100}%`,background:T.green,borderRadius:"0 4px 4px 0" }}/>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
@@ -329,6 +1008,7 @@ function Ranking({ ativos, T }) {
 function EditarAtivos({ ativos, setAtivos, T }) {
   const [filtroCat, setFiltroCat] = useState("TODOS");
   const [busca, setBusca] = useState("");
+  const [abertos, setAbertos] = useState({}); // grupos expandidos
 
   const lista = ativos.filter(a => {
     if (filtroCat === "FII" && a.cat !== "FII") return false;
@@ -380,56 +1060,119 @@ function EditarAtivos({ ativos, setAtivos, T }) {
         ))}
       </div>
 
-      {/* Lista editável */}
-      {lista.map(a=>{
-        const c = corDe(a.ticker,a.cat,T);
-        const valorTotal = a.qtd*a.cotacao;
-        const result = (a.cotacao-a.precoMedio)*a.qtd;
-        return (
-          <div key={a.ticker} style={{ background:T.card,border:`1px solid ${T.border}`,borderLeft:`3px solid ${c}`,borderRadius:10,padding:"12px",marginBottom:8 }}>
-            {/* cabeçalho */}
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:7 }}>
-                <div style={{ width:9,height:9,borderRadius:2,background:c }}/>
-                <div>
-                  <span style={{ fontSize:13,fontWeight:800,color:T.text }}>{a.ticker}</span>
-                  <span style={{ fontSize:9,color:c,background:`${c}1a`,padding:"1px 6px",borderRadius:4,marginLeft:6 }}>{a.cat}</span>
-                  <div style={{ fontSize:10,color:T.textFaint,marginTop:1 }}>{a.nome}</div>
+      {/* Lista editável — agrupada por categoria, expansível */}
+      {(() => {
+        const grupos = {};
+        lista.forEach(a => { const g = grupoDe(a); (grupos[g] = grupos[g] || []).push(a); });
+        const ordenados = ORDEM_GRUPOS.filter(g => grupos[g]);
+        if (ordenados.length === 0) return <div style={{ fontSize:12, color:T.textFaint, textAlign:"center", padding:"20px 0" }}>Nenhum ativo encontrado</div>;
+        const buscando = busca.trim().length > 0;
+        return ordenados.map(g => {
+          const itens = grupos[g];
+          const cg = COR_GRUPO(g, T);
+          const aberto = buscando || abertos[g]; // busca abre tudo
+          const patri = itens.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+          const divAno = itens.reduce((s,a)=>s+a.prov*a.meses.length*a.qtd,0);
+          return (
+            <div key={g} style={{ marginBottom:8 }}>
+              {/* cabeçalho do grupo (clicável) */}
+              <div onClick={()=>setAbertos(p=>({ ...p, [g]:!p[g] }))} style={{
+                display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer",
+                background:T.card, border:`1px solid ${T.border}`, borderLeft:`3px solid ${cg}`,
+                borderRadius:10, padding:"11px 13px"
+              }}>
+                <div style={{ display:"flex", alignItems:"center", gap:9 }}>
+                  <span style={{ fontSize:11, color:T.textFaint, transform:aberto?"rotate(90deg)":"none", transition:"transform 0.2s", display:"inline-block" }}>▶</span>
+                  <span style={{ fontSize:15 }}>{EMOJI_GRUPO[g]}</span>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:800, color:T.text }}>{g}</div>
+                    <div style={{ fontSize:9, color:T.textFaint }}>{itens.length} ativo{itens.length>1?"s":""}</div>
+                  </div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontSize:13, fontWeight:800, color:cg }}>{fmt(patri)}</div>
+                  <div style={{ fontSize:9, color:T.green }}>{fmt(divAno)}/ano</div>
                 </div>
               </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:13,fontWeight:800,color:T.text }}>{fmt(valorTotal)}</div>
-                <div style={{ fontSize:10,color:result>=0?T.green:T.red }}>{result>=0?"+":""}{fmt(result)}</div>
-              </div>
-            </div>
 
-            {/* campos editáveis */}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-              <CampoEdit label="Quantidade" valor={a.qtd} step="1" onChange={v=>atualizar(a.ticker,"qtd",Math.max(0,Math.round(v)))} T={T}/>
-              <CampoEdit label="Preço médio (R$)" valor={a.precoMedio} step="0.01" onChange={v=>atualizar(a.ticker,"precoMedio",Math.max(0,v))} T={T}/>
-              <CampoEdit label="Cotação atual (R$)" valor={a.cotacao} step="0.01" onChange={v=>atualizar(a.ticker,"cotacao",Math.max(0,v))} T={T}/>
-              <CampoEdit label="Provento/cota (R$)" valor={a.prov} step="0.01" onChange={v=>atualizar(a.ticker,"prov",Math.max(0,v))} T={T}/>
+              {/* cards dos ativos (quando aberto) */}
+              {aberto && (
+                <div style={{ paddingLeft:6, marginTop:6 }}>
+                  {itens.map(a=>{
+                    const c = corDe(a.ticker,a.cat,T);
+                    const valorTotal = a.qtd*a.cotacao;
+                    const result = (a.cotacao-a.precoMedio)*a.qtd;
+                    return (
+                      <div key={a.ticker} style={{ background:T.card,border:`1px solid ${T.border}`,borderLeft:`3px solid ${c}`,borderRadius:10,padding:"12px",marginBottom:8 }}>
+                        {/* cabeçalho */}
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                          <div style={{ display:"flex",alignItems:"center",gap:7 }}>
+                            <div style={{ width:9,height:9,borderRadius:2,background:c }}/>
+                            <div>
+                              <span style={{ fontSize:13,fontWeight:800,color:T.text }}>{a.ticker}</span>
+                              {a.setor && <span style={{ fontSize:9,color:T.textMute,background:T.cardAlt,padding:"1px 6px",borderRadius:4,marginLeft:6 }}>{a.setor}</span>}
+                              <div style={{ fontSize:10,color:T.textFaint,marginTop:1 }}>{a.nome}</div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign:"right" }}>
+                            <div style={{ fontSize:13,fontWeight:800,color:T.text }}>{fmt(valorTotal)}</div>
+                            <div style={{ fontSize:10,color:result>=0?T.green:T.red }}>{result>=0?"+":""}{fmt(result)}</div>
+                          </div>
+                        </div>
+                        {/* campos editáveis */}
+                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                          <CampoEdit label="Quantidade" valor={a.qtd} step="1" onChange={v=>atualizar(a.ticker,"qtd",Math.max(0,Math.round(v)))} T={T}/>
+                          <CampoEdit label="Preço médio (R$)" valor={a.precoMedio} step="0.01" onChange={v=>atualizar(a.ticker,"precoMedio",Math.max(0,v))} T={T}/>
+                          <CampoEdit label="Cotação atual (R$)" valor={a.cotacao} step="0.01" onChange={v=>atualizar(a.ticker,"cotacao",Math.max(0,v))} T={T}/>
+                          <CampoEdit label="Provento/cota (R$)" valor={a.prov} step="0.01" onChange={v=>atualizar(a.ticker,"prov",Math.max(0,v))} T={T}/>
+                        </div>
+                        {/* frequência */}
+                        <div style={{ marginTop:8 }}>
+                          <div style={{ fontSize:9,color:T.textFaint,marginBottom:4 }}>Frequência de pagamento</div>
+                          <div style={{ display:"flex",gap:4 }}>
+                            {FREQS.map(f=>(
+                              <button key={f} onClick={()=>{
+                                atualizar(a.ticker,"freq",f);
+                                const novosMeses = f==="Mensal" ? [1,2,3,4,5,6,7,8,9,10,11,12]
+                                  : f==="Trimestral" ? [3,6,9,12]
+                                  : [6,12];
+                                atualizar(a.ticker,"meses",novosMeses);
+                              }} style={{ flex:"1 1 0",padding:"5px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:a.freq===f?c:T.border,color:a.freq===f?"#fff":T.textMute }}>{f}</button>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Magic Number — quantas cotas para o dividendo comprar 1 cota sozinho */}
+                        {(() => {
+                          const provMensal = a.prov * (a.meses.length/12); // provento médio mensal por cota
+                          if (provMensal<=0 || a.cotacao<=0) return null;
+                          const magic = Math.ceil(a.cotacao / provMensal); // cotas necessárias p/ 1 cota/mês
+                          const faltam = Math.max(magic - a.qtd, 0);
+                          const ok = a.qtd >= magic;
+                          const prog = Math.min(a.qtd/magic*100, 100);
+                          return (
+                            <div style={{ marginTop:8, background:ok?`${T.green}10`:T.cardAlt, border:`1px solid ${ok?T.green+"44":T.border}`, borderRadius:8, padding:"8px 10px" }}>
+                              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                                <span style={{ fontSize:10, color:T.textMute }}>✨ Magic Number <span style={{ color:T.textFaint }}>(cotas p/ autossustentar)</span></span>
+                                <span style={{ fontSize:11, fontWeight:800, color:ok?T.green:c }}>{a.qtd} / {magic}</span>
+                              </div>
+                              <div style={{ height:4, background:T.border, borderRadius:3, overflow:"hidden" }}>
+                                <div style={{ height:"100%", width:`${prog}%`, background:ok?T.green:c, borderRadius:3 }}/>
+                              </div>
+                              <div style={{ fontSize:9, color:ok?T.green:T.textFaint, marginTop:3 }}>
+                                {ok ? "✓ O dividendo já compra 1 cota por mês sozinho!" : `Faltam ${faltam} cotas para o dividendo comprar 1 cota/mês`}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-
-            {/* frequência */}
-            <div style={{ marginTop:8 }}>
-              <div style={{ fontSize:9,color:T.textFaint,marginBottom:4 }}>Frequência de pagamento</div>
-              <div style={{ display:"flex",gap:4 }}>
-                {FREQS.map(f=>(
-                  <button key={f} onClick={()=>{
-                    atualizar(a.ticker,"freq",f);
-                    // ajusta meses conforme frequência
-                    const novosMeses = f==="Mensal" ? [1,2,3,4,5,6,7,8,9,10,11,12]
-                      : f==="Trimestral" ? [3,6,9,12]
-                      : [6,12];
-                    atualizar(a.ticker,"meses",novosMeses);
-                  }} style={{ flex:"1 1 0",padding:"5px 4px",borderRadius:6,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:a.freq===f?c:T.border,color:a.freq===f?"#fff":T.textMute }}>{f}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })}
+          );
+        });
+      })()}
 
       {/* Reset */}
       <button onClick={resetar} style={{ width:"100%",padding:"10px",borderRadius:8,border:`1px solid ${T.red}44`,background:`${T.red}11`,color:T.red,cursor:"pointer",fontSize:12,fontWeight:600,marginTop:6 }}>
@@ -459,7 +1202,71 @@ function CampoEdit({ label, valor, step, onChange, T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // ABA CENÁRIO FUTURO
 // ════════════════════════════════════════════════════════════════════════════
-function CenarioFuturo({ ativos, T }) {
+// ════════════════════════════════════════════════════════════════════════════
+// MODAL — adicionar aporte esporádico (valor + data)
+// ════════════════════════════════════════════════════════════════════════════
+function ModalAporteExtra({ horizonte, onAdd, onClose, T }) {
+  const [valor, setValor] = useState(2000);
+  const [mes, setMes]     = useState(5); // padrão: primeiro dezembro
+  const [label, setLabel] = useState("13º");
+  const LABELS = [
+    { id:"13º",    emoji:"🎁" },
+    { id:"Férias", emoji:"🏖️" },
+    { id:"Venda",  emoji:"🏷️" },
+    { id:"Bônus",  emoji:"💵" },
+    { id:"Outro",  emoji:"⚡" },
+  ];
+  // lista de meses disponíveis no horizonte
+  const opcoesMes = Array.from({ length: horizonte }, (_, i) => i);
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000a", zIndex:1100, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"20px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:420, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <div style={{ fontSize:17, fontWeight:800, color:T.text }}>⚡ Aporte esporádico</div>
+          <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
+        </div>
+
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:5 }}>Valor do aporte (R$)</div>
+        <input type="number" min="0" value={valor} onChange={e=>setValor(Math.max(0,+e.target.value))}
+          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.amber}`, borderRadius:10, color:T.text, padding:"11px 14px", fontSize:20, fontWeight:800, textAlign:"center", marginBottom:14 }}/>
+
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:5 }}>Tipo de evento</div>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+          {LABELS.map(l=>(
+            <button key={l.id} onClick={()=>setLabel(l.id)} style={{
+              flex:"1 1 0", padding:"8px 4px", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:600,
+              border:`2px solid ${label===l.id?T.amber:T.border}`,
+              background:label===l.id?`${T.amber}1a`:T.cardAlt, color:label===l.id?T.amber:T.textMute
+            }}>{l.emoji} {l.id}</button>
+          ))}
+        </div>
+
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:5 }}>Quando? (mês do evento)</div>
+        <select value={mes} onChange={e=>setMes(+e.target.value)}
+          style={{ width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:10, color:T.text, padding:"11px 14px", fontSize:14, fontWeight:600, marginBottom:18 }}>
+          {opcoesMes.map(i=>(
+            <option key={i} value={i}>{labelMes(i)}{i>=5 && (i-5)%12===0 ? " 🎁 (dezembro)" : ""}</option>
+          ))}
+        </select>
+
+        <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px", marginBottom:16 }}>
+          <div style={{ fontSize:10, color:T.textFaint }}>Vai adicionar</div>
+          <div style={{ fontSize:14, fontWeight:800, color:T.amber }}>{fmt(valor)} <span style={{ fontSize:11, color:T.textMute, fontWeight:600 }}>em {labelMes(mes)}</span></div>
+          <div style={{ fontSize:10, color:T.textFaint, marginTop:2 }}>Esse valor será reinvestido (compra cotas) conforme sua estratégia.</div>
+        </div>
+
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onClose} style={{ flex:"1 1 0", padding:"12px", borderRadius:10, border:`1px solid ${T.borderSoft}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:13, fontWeight:600 }}>Cancelar</button>
+          <button onClick={()=>{ if(valor>0){ onAdd({ mes, valor, label }); onClose(); } }}
+            style={{ flex:"1 1 0", padding:"12px", borderRadius:10, border:"none", background:T.amber, color:"#1a1a1a", cursor:"pointer", fontSize:13, fontWeight:700 }}>✓ Adicionar ponto</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
   const PRESETS = [
     { id:"mfii",  emoji:"🏗️", label:"100% MFII11",   desc:"Mérito — paga todo mês",     regras:[{ticker:"MFII11",pct:100,cotacaoAlvo:50.71}] },
     { id:"kncr",  emoji:"💼", label:"100% KNCR11",   desc:"Kinea — CRI seguro",         regras:[{ticker:"KNCR11",pct:100,cotacaoAlvo:107.28}] },
@@ -473,6 +1280,9 @@ function CenarioFuturo({ ativos, T }) {
   const [aporte,    setAporte]    = useState(0);
   const [modo,      setModo]      = useState("provento");
   const [mesSelSim, setMesSelSim] = useState(0);
+  const [aportesExtras, setAportesExtras] = useState([]); // [{mes, valor, label}]
+  const [showAporteExtra, setShowAporteExtra] = useState(false);
+  const [comCartao, setComCartao] = useState(false); // fluxo de reinvestimento com/sem crédito do cartão
   const [customR,   setCustomR]   = useState([
     { ticker:"MFII11",pct:60,cotacaoAlvo:50.71 },
     { ticker:"VGHF11",pct:40,cotacaoAlvo:5.99 },
@@ -483,10 +1293,45 @@ function CenarioFuturo({ ativos, T }) {
   const pctTotal = regras.reduce((s,r)=>s+r.pct,0);
   const PATRI_INICIAL = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
 
+  // remove aportes extras que caem fora do horizonte atual
+  const extrasValidos = aportesExtras.filter(e => e.mes < horizonte);
+
   const dados = useMemo(
-    () => simular(ativos, regras, horizonte, aporte),
-    [presetId, horizonte, aporte, JSON.stringify(customR), JSON.stringify(ativos)]
+    () => simular(ativos, regras, horizonte, aporte, extrasValidos),
+    [presetId, horizonte, aporte, JSON.stringify(customR), JSON.stringify(ativos), JSON.stringify(extrasValidos)]
   );
+
+  // simulação do fluxo de reinvestimento COM o crédito do cartão (R$ provisionados)
+  const dadosComCartao = useMemo(
+    () => simular(ativos, regras, horizonte, aporte, extrasValidos, fundosProvisionados),
+    [presetId, horizonte, aporte, JSON.stringify(customR), JSON.stringify(ativos), JSON.stringify(extrasValidos), fundosProvisionados]
+  );
+
+  // dados de reinvestimento acumulado (para o gráfico #9)
+  const dadosReinvest = useMemo(() => {
+    let ac=0, acC=0;
+    return dados.map((d,i)=>{
+      ac += d.reinvestido;
+      acC += dadosComCartao[i]?.reinvestido || 0;
+      return { mes:d.mes, reinvestido:d.reinvestido, acumulado:+ac.toFixed(2), acumuladoCartao:+acC.toFixed(2) };
+    });
+  }, [dados, dadosComCartao]);
+
+  // ESTRATEGISTA (#5): ranking por dividend yield — mais dividendo por R$ investido
+  const rankYield = useMemo(() => {
+    return ativos
+      .filter(a => a.cotacao>0 && a.prov>0)
+      .map(a => {
+        const provAnual = a.prov * a.meses.length;
+        const yieldAnual = (provAnual / a.cotacao) * 100;
+        return { ticker:a.ticker, nome:a.nome, cat:a.cat, setor:a.setor, cotacao:a.cotacao,
+                 yieldAnual:+yieldAnual.toFixed(2), yieldMensal:+(yieldAnual/12).toFixed(2) };
+      })
+      .sort((a,b)=>b.yieldAnual-a.yieldAnual);
+  }, [ativos]);
+  const melhor = rankYield[0];
+  const totalReinvestSemCartao = dadosReinvest[dadosReinvest.length-1]?.acumulado || 0;
+  const totalReinvestComCartao = dadosReinvest[dadosReinvest.length-1]?.acumuladoCartao || 0;
 
   const provInicial = dados[0]?.provento || 0;
   const provMedioFinal = dados[dados.length-1]?.provMedio || 0;
@@ -497,7 +1342,7 @@ function CenarioFuturo({ ativos, T }) {
   function updR(i,f,v) { setCustomR(prev=>prev.map((r,j)=>j===i?{...r,[f]:v}:r)); }
 
   const HORIZ = [{v:12,l:"1a"},{v:24,l:"2a"},{v:36,l:"3a"},{v:60,l:"5a"},{v:120,l:"10a"}];
-  const APORTES = [0,100,200,500,1000];
+  const APORTES = [-500,-200,0,100,200,500,1000];
   const mSel = dados[Math.min(mesSelSim, dados.length-1)];
 
   return (
@@ -530,12 +1375,68 @@ function CenarioFuturo({ ativos, T }) {
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:11,color:T.textMute,marginBottom:6 }}>Aporte mensal extra (além dos proventos)</div>
+          <div style={{ fontSize:11,color:T.textMute,marginBottom:6 }}>Aporte mensal extra (+) ou retirada para despesas (−)</div>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-            {APORTES.map(v=>(
-              <button key={v} onClick={()=>setAporte(v)} style={{ padding:"6px 10px",borderRadius:8,border:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:aporte===v?T.green:T.border,color:aporte===v?"#fff":T.textMute }}>{v===0?"Sem aporte":`+${fmt(v)}`}</button>
-            ))}
+            {APORTES.map(v=>{
+              const neg = v<0; const sel = aporte===v;
+              const bg = sel ? (neg?T.red:T.green) : T.border;
+              const fg = sel ? "#fff" : (neg?T.red:T.textMute);
+              return (
+                <button key={v} onClick={()=>setAporte(v)} style={{ padding:"6px 10px",borderRadius:8,border:neg&&!sel?`1px solid ${T.red}55`:"none",cursor:"pointer",fontSize:10,fontWeight:600,background:bg,color:fg }}>
+                  {v===0?"Sem aporte":neg?`−${fmt(Math.abs(v))}`:`+${fmt(v)}`}
+                </button>
+              );
+            })}
           </div>
+          {aporte<0 && (
+            <div style={{ fontSize:9,color:T.red,marginTop:5 }}>↓ Retirando {fmt(Math.abs(aporte))}/mês dos proventos para despesas — reinveste menos.</div>
+          )}
+        </div>
+
+        {/* APORTES ESPORÁDICOS — pontos de aceleração únicos (13º, férias, venda) */}
+        <div style={{ marginBottom:12, background:`${T.amber}0d`, border:`1px solid ${T.amber}33`, borderRadius:10, padding:"10px 12px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+            <div>
+              <div style={{ fontSize:11, color:T.amber, fontWeight:700 }}>⚡ Aportes esporádicos</div>
+              <div style={{ fontSize:9, color:T.textFaint, marginTop:1 }}>Eventos únicos que reinvestem (13º, férias, venda de item)</div>
+            </div>
+            <button onClick={()=>setShowAporteExtra(true)} style={{
+              padding:"7px 12px", borderRadius:8, border:"none", cursor:"pointer",
+              background:T.amber, color:"#1a1a1a", fontSize:11, fontWeight:700
+            }}>➕ Adicionar</button>
+          </div>
+          {/* atalho rápido: 13º de R$2.000 em dezembro */}
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom: extrasValidos.length?8:0 }}>
+            <button onClick={()=>{
+              // adiciona R$2.000 no próximo dezembro dentro do horizonte (Dez = offset 5, 17, 29...)
+              const proxDez = [5,17,29,41,53,65,77,89,101,113].find(m => m < horizonte);
+              if(proxDez!=null && !aportesExtras.some(e=>e.mes===proxDez && e.label==="13º"))
+                setAportesExtras(prev=>[...prev,{mes:proxDez, valor:2000, label:"13º"}]);
+            }} style={{ padding:"5px 10px",borderRadius:7,border:`1px solid ${T.amber}55`,background:"transparent",color:T.amber,cursor:"pointer",fontSize:10,fontWeight:600 }}>
+              🎁 13º · R$2.000 (Dez)
+            </button>
+          </div>
+          {/* lista dos aportes adicionados */}
+          {extrasValidos.length>0 && (
+            <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+              {extrasValidos.sort((a,b)=>a.mes-b.mes).map((e,i)=>(
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:T.cardAlt, borderRadius:7, padding:"6px 10px" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:13 }}>{e.label==="13º"?"🎁":e.label==="Férias"?"🏖️":e.label==="Venda"?"🏷️":"⚡"}</span>
+                    <div>
+                      <span style={{ fontSize:11, fontWeight:700, color:T.text }}>{fmt(e.valor)}</span>
+                      <span style={{ fontSize:10, color:T.textMute, marginLeft:6 }}>{e.label} · {labelMes(e.mes)}</span>
+                    </div>
+                  </div>
+                  <button onClick={()=>setAportesExtras(prev=>prev.filter(x=>!(x.mes===e.mes&&x.valor===e.valor&&x.label===e.label)))}
+                    style={{ background:"transparent", border:"none", color:T.red, cursor:"pointer", fontSize:15, lineHeight:1 }}>×</button>
+                </div>
+              ))}
+              <div style={{ fontSize:10, color:T.textFaint, textAlign:"right", marginTop:2 }}>
+                Total esporádico: <strong style={{ color:T.amber }}>{fmt(extrasValidos.reduce((s,e)=>s+(+e.valor||0),0))}</strong>
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
@@ -588,8 +1489,8 @@ function CenarioFuturo({ ativos, T }) {
       <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 6px 10px",marginBottom:14 }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",paddingLeft:8,marginBottom:10 }}>
           <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1 }}>Evolução mês a mês</div>
-          <div style={{ display:"flex",gap:4 }}>
-            {[["provento","💰 Proventos"],["patrimonio","💼 Patrimônio"]].map(([id,l])=>(
+          <div style={{ display:"flex",gap:4,flexWrap:"wrap" }}>
+            {[["provento","💰 Proventos"],["patrimonio","💼 Patrimônio"],["caixa","💵 Caixa"],["limiteCartao","💳 Limite cartão"]].map(([id,l])=>(
               <button key={id} onClick={()=>setModo(id)} style={{ padding:"4px 8px",borderRadius:6,border:"none",cursor:"pointer",fontSize:9,fontWeight:600,background:modo===id?T.accent:T.border,color:modo===id?"#fff":T.textMute }}>{l}</button>
             ))}
           </div>
@@ -607,6 +1508,14 @@ function CenarioFuturo({ ativos, T }) {
                   <stop offset="0%" stopColor={T.accent} stopOpacity={0.4}/>
                   <stop offset="100%" stopColor={T.accent} stopOpacity={0.02}/>
                 </linearGradient>
+                <linearGradient id="gradCaixa" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={T.cyan} stopOpacity={0.4}/>
+                  <stop offset="100%" stopColor={T.cyan} stopOpacity={0.02}/>
+                </linearGradient>
+                <linearGradient id="gradCartao" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={T.amber} stopOpacity={0.4}/>
+                  <stop offset="100%" stopColor={T.amber} stopOpacity={0.02}/>
+                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
               <XAxis dataKey="mes" tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false}
@@ -615,17 +1524,37 @@ function CenarioFuturo({ ativos, T }) {
                 width={42} domain={[0,'auto']}
                 tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${Math.round(v)}`}/>
               <Tooltip content={<TipSim T={T} />}/>
-              {modo==="provento" ? (
+              {/* marcadores dos aportes esporádicos (pontos de aceleração) */}
+              {extrasValidos.map((e,i)=>(
+                <ReferenceLine key={i} x={labelMes(e.mes)} stroke={T.amber} strokeDasharray="4 3" strokeWidth={1.5}
+                  label={{ value:`⚡${(e.valor/1000).toFixed(e.valor>=1000?0:1)}k`, position:"top", fontSize:9, fill:T.amber }}/>
+              ))}
+              {modo==="provento" && (
                 <Area type="monotone" dataKey="provMedio" name="Provento médio/mês"
                   stroke={T.green} strokeWidth={2.5} fill="url(#gradProv)" dot={false} activeDot={{ r:4, fill:T.green }}/>
-              ) : (
+              )}
+              {modo==="patrimonio" && (
                 <Area type="monotone" dataKey="patrimonio" name="Patrimônio total"
                   stroke={T.accent} strokeWidth={2.5} fill="url(#gradPatri)" dot={false} activeDot={{ r:4, fill:T.accent }}/>
+              )}
+              {modo==="caixa" && (
+                <Area type="monotone" dataKey="caixa" name="Caixa acumulado"
+                  stroke={T.cyan} strokeWidth={2.5} fill="url(#gradCaixa)" dot={false} activeDot={{ r:4, fill:T.cyan }}/>
+              )}
+              {modo==="limiteCartao" && (
+                <Area type="monotone" dataKey="limiteCartao" name="Limite cartão (projeção)"
+                  stroke={T.amber} strokeWidth={2.5} fill="url(#gradCartao)" dot={false} activeDot={{ r:4, fill:T.amber }}/>
               )}
             </AreaChart>
           </ResponsiveContainer>
         </div>
-
+        {modo==="limiteCartao" && (
+          <div style={{ background:`${T.amber}12`, border:`1px dashed ${T.amber}55`, borderRadius:8, padding:"8px 10px", margin:"0 8px 8px" }}>
+            <div style={{ fontSize:9, color:T.amber, lineHeight:1.5 }}>
+              💳 <strong>Prévia.</strong> Hoje mostra ~40% do patrimônio como limite estimado. Vamos refinar isso na aba de cartões (Onda 3), usando ativos como Tesouro de garantia.
+            </div>
+          </div>
+        )}
         <div style={{ display:"flex",gap:6,marginTop:10,paddingLeft:8,overflowX:"auto" }}>
           {[12,24,36,60,120].filter(m=>m<=horizonte).map(m=>{
             const d = dados[m-1]; if(!d) return null;
@@ -708,11 +1637,131 @@ function CenarioFuturo({ ativos, T }) {
         )}
       </div>
 
+      {/* ═══ MODO ESTRATEGISTA (#5) — onde colocar o próximo real ═══ */}
+      {melhor && (
+        <div style={{ background:`linear-gradient(135deg, ${T.green}1c, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"16px 14px", marginBottom:14 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+            <span style={{ fontSize:20 }}>🧠</span>
+            <div style={{ fontSize:13, fontWeight:800, color:T.text }}>Pense como estrategista</div>
+          </div>
+          <div style={{ fontSize:10, color:T.textMute, marginBottom:12, lineHeight:1.5 }}>
+            Para <strong style={{ color:T.green }}>mais dividendo em menos tempo</strong>, o que rende mais por real investido hoje é:
+          </div>
+
+          {/* destaque do melhor ativo */}
+          <div style={{ background:T.card, border:`1.5px solid ${T.green}`, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:9, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>🏆 Melhor agora</div>
+                <div style={{ fontSize:17, fontWeight:800, color:T.text, marginTop:2 }}>{melhor.ticker}</div>
+                <div style={{ fontSize:9, color:T.textFaint }}>{melhor.nome} · {melhor.setor}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:22, fontWeight:800, color:T.green }}>{melhor.yieldAnual.toFixed(1)}%</div>
+                <div style={{ fontSize:9, color:T.textMute }}>ao ano · {melhor.yieldMensal.toFixed(2)}%/mês</div>
+              </div>
+            </div>
+          </div>
+
+          {/* top yields — barras */}
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Maiores rendimentos da carteira</div>
+          {rankYield.slice(0,5).map((r,i)=>{
+            const max = rankYield[0].yieldAnual||1;
+            const c = corDe(r.ticker, r.cat, T);
+            return (
+              <div key={r.ticker} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                <span style={{ fontSize:10, color:T.textFaint, fontWeight:700, minWidth:16 }}>#{i+1}</span>
+                <span style={{ fontSize:11, fontWeight:700, color:T.text, minWidth:58 }}>{r.ticker}</span>
+                <div style={{ flex:1, height:7, background:T.cardAlt, borderRadius:4, overflow:"hidden" }}>
+                  <div style={{ height:"100%", width:`${(r.yieldAnual/max)*100}%`, background:c, borderRadius:4 }}/>
+                </div>
+                <span style={{ fontSize:11, fontWeight:700, color:c, minWidth:42, textAlign:"right" }}>{r.yieldAnual.toFixed(1)}%</span>
+              </div>
+            );
+          })}
+
+          {/* dica estratégica */}
+          <div style={{ marginTop:10, background:`${T.amber}12`, border:`1px solid ${T.amber}33`, borderRadius:9, padding:"9px 11px" }}>
+            <div style={{ fontSize:10, color:T.amber, lineHeight:1.6 }}>
+              💡 <strong>Tática:</strong> concentrar nos maiores yields acelera a bola de neve no começo. Mas diversifique para reduzir risco — alto yield às vezes vem com mais risco. Use os presets abaixo para testar concentrar vs diversificar.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ FLUXO DE REINVESTIMENTO (#9) — gráfico próprio, com/sem cartão ═══ */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 6px 12px", marginBottom:14 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", paddingLeft:8, paddingRight:8, marginBottom:10 }}>
+          <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>♻️ Fluxo de reinvestimento</div>
+          <button onClick={()=>setComCartao(v=>!v)} style={{
+            padding:"5px 10px", borderRadius:7, cursor:"pointer", fontSize:10, fontWeight:700,
+            border:`1px solid ${comCartao?T.amber:T.border}`,
+            background:comCartao?`${T.amber}1a`:T.cardAlt, color:comCartao?T.amber:T.textMute
+          }}>💳 {comCartao?"Com cartão (ON)":"Com cartão (OFF)"}</button>
+        </div>
+
+        {/* resumo */}
+        <div style={{ display:"flex", gap:8, padding:"0 8px", marginBottom:10, flexWrap:"wrap" }}>
+          <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 10px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Reinvestido (sem cartão)</div>
+            <div style={{ fontSize:13, fontWeight:800, color:T.cyan }}>{fmt(totalReinvestSemCartao)}</div>
+          </div>
+          {comCartao && (
+            <div style={{ background:`${T.amber}12`, border:`1px solid ${T.amber}44`, borderRadius:8, padding:"6px 10px" }}>
+              <div style={{ fontSize:9, color:T.textFaint }}>Com cartão (+{fmt(fundosProvisionados)})</div>
+              <div style={{ fontSize:13, fontWeight:800, color:T.amber }}>{fmt(totalReinvestComCartao)}</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ width:"100%", height:200 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={dadosReinvest} margin={{ top:8,right:12,left:0,bottom:0 }}>
+              <defs>
+                <linearGradient id="gradReinv" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={T.cyan} stopOpacity={0.4}/>
+                  <stop offset="100%" stopColor={T.cyan} stopOpacity={0.02}/>
+                </linearGradient>
+                <linearGradient id="gradReinvC" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={T.amber} stopOpacity={0.4}/>
+                  <stop offset="100%" stopColor={T.amber} stopOpacity={0.02}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
+              <XAxis dataKey="mes" tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false}
+                interval={Math.max(Math.floor(dadosReinvest.length/7)-1,0)} minTickGap={10}/>
+              <YAxis tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false}
+                width={42} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${Math.round(v)}`}/>
+              <Tooltip content={<TipSim T={T} />}/>
+              {comCartao && (
+                <Area type="monotone" dataKey="acumuladoCartao" name="Reinvestido c/ cartão"
+                  stroke={T.amber} strokeWidth={2.5} fill="url(#gradReinvC)" dot={false} activeDot={{ r:4, fill:T.amber }}/>
+              )}
+              <Area type="monotone" dataKey="acumulado" name="Reinvestido acumulado"
+                stroke={T.cyan} strokeWidth={2.5} fill="url(#gradReinv)" dot={false} activeDot={{ r:4, fill:T.cyan }}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ fontSize:9, color:T.textFaint, padding:"6px 10px 0", lineHeight:1.6 }}>
+          Mostra só o dinheiro que voltou pra carteira como novas cotas (acumulado). {comCartao ? `Com cartão: injeta ${fmt(fundosProvisionados)} de crédito garantido por ativos no início, acelerando as compras.` : "Ative o cartão para ver o efeito dos fundos provisionados."}
+        </div>
+      </div>
+
       <div style={{ background:T.cardAlt,border:`1px dashed ${T.borderSoft}`,borderRadius:10,padding:"10px 12px" }}>
         <div style={{ fontSize:10,color:T.textFaint,lineHeight:1.7 }}>
           🤖 <strong style={{ color:T.textMute }}>Como funciona:</strong> Cada mês recebe os proventos das cotas que você já tem (incluindo as compradas antes — efeito bola de neve). Esse valor + aporte compra novas cotas inteiras. A sobra acumula. Cotações e proventos/cota mantidos constantes. Sem IR/taxas.
         </div>
       </div>
+
+      {/* MODAL aporte esporádico */}
+      {showAporteExtra && (
+        <ModalAporteExtra
+          horizonte={horizonte}
+          onAdd={(novo)=>setAportesExtras(prev=>[...prev, novo])}
+          onClose={()=>setShowAporteExtra(false)}
+          T={T}
+        />
+      )}
     </div>
   );
 }
@@ -735,6 +1784,7 @@ function gerarEstagios(metaMensal, nEstagios) {
 }
 
 function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, T }) {
+  const [aberta, setAberta] = useState(false);
   const N = 5; // numero de estagios
   const estagios = gerarEstagios(metaMensal, N);
   const pctGeral = Math.min((valorAtual / metaMensal) * 100, 100);
@@ -747,22 +1797,37 @@ function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, T }) {
   const faltaMetaFinal = metaBatida ? 0 : metaMensal - valorAtual;
 
   return (
-    <div style={{ marginTop:14, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px 14px 14px" }}>
-      {/* cabeçalho da trilha */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-        <div>
-          <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>🎯 Meta de proventos / mês</div>
-          <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:2 }}>
-            <span style={{ fontSize:16, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
-            <span style={{ fontSize:11, color:T.textFaint }}>de {fmt(metaMensal)}</span>
-            {metaBatida && <span style={{ fontSize:10, color:T.green, fontWeight:700 }}>✓ batida!</span>}
+    <div style={{ marginTop:12, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"11px 13px" }}>
+      {/* cabeçalho compacto — sempre visível, clicável para expandir */}
+      <div onClick={()=>setAberta(v=>!v)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, minWidth:0 }}>
+          <span style={{ fontSize:11, color:T.textFaint, transform:aberta?"rotate(90deg)":"none", transition:"transform 0.2s", display:"inline-block" }}>▶</span>
+          <span style={{ fontSize:14 }}>🎯</span>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"baseline", gap:5 }}>
+              <span style={{ fontSize:14, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
+              <span style={{ fontSize:10, color:T.textFaint }}>/ {fmt(metaMensal)}</span>
+            </div>
+            {/* mini barra */}
+            <div style={{ height:4, background:T.cardAlt, borderRadius:3, overflow:"hidden", marginTop:3 }}>
+              <div style={{ height:"100%", width:`${pctGeral}%`, background:metaBatida?T.green:`linear-gradient(to right, ${CORES_ESTAGIOS[0]}, ${CORES_ESTAGIOS[3]})`, borderRadius:3 }}/>
+            </div>
           </div>
         </div>
+        <div style={{ textAlign:"right", marginLeft:10 }}>
+          {metaBatida
+            ? <span style={{ fontSize:11, fontWeight:700, color:T.green }}>✓ batida</span>
+            : <><div style={{ fontSize:12, fontWeight:800, color:"#ef4444" }}>faltam {fmtK(faltaProximo)}</div><div style={{ fontSize:8, color:T.textFaint }}>p/ {fmtK(proximoEstagio.valor)}</div></>}
+        </div>
+      </div>
+
+      {/* conteúdo expandido */}
+      {aberta && (<>
+      <div style={{ display:"flex", justifyContent:"flex-end", marginTop:10, marginBottom:8 }}>
         <button onClick={onConfigurar} title="Definir meta" style={{
-          padding:"6px 10px", borderRadius:8, border:`1px solid ${T.border}`,
-          background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11, fontWeight:600,
-          display:"flex", alignItems:"center", gap:4
-        }}>🎯 Definir</button>
+          padding:"5px 10px", borderRadius:8, border:`1px solid ${T.border}`,
+          background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11, fontWeight:600
+        }}>🎯 Definir meta</button>
       </div>
 
       {/* trilha visual com setas/checkpoints */}
@@ -886,6 +1951,7 @@ function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, T }) {
           </>
         )}
       </div>
+      </>)}
     </div>
   );
 }
@@ -975,9 +2041,256 @@ function ModalMeta({ metaMensal, setMetaMensal, valorAtual, onClose, T }) {
 
 
 // ════════════════════════════════════════════════════════════════════════════
+// ABA CUSTO DE VIDA — gastos fixos + marcos de provento/mês necessário
+// ════════════════════════════════════════════════════════════════════════════
+const CUSTOS_DEF = [
+  { id:"agua",       emoji:"💧", label:"Água" },
+  { id:"luz",        emoji:"⚡", label:"Luz / Energia" },
+  { id:"condominio", emoji:"🏢", label:"Condomínio" },
+  { id:"aluguel",    emoji:"🏠", label:"Aluguel / Moradia" },
+  { id:"internet",   emoji:"🌐", label:"Internet / Telefone" },
+  { id:"outros",     emoji:"📦", label:"Outros fixos" },
+];
+
+function CustoVida({ custoVida, setCustoVida, mediaMes, T }) {
+  const custoTotal = Object.values(custoVida).reduce((s,v)=>s+(+v||0),0);
+
+  // marcos: ordena os gastos do menor pro maior e acumula (cobrir o + barato primeiro)
+  const gastos = CUSTOS_DEF
+    .map(c => ({ ...c, valor:+custoVida[c.id]||0 }))
+    .filter(c => c.valor>0)
+    .sort((a,b)=>a.valor-b.valor);
+  let acumulado = 0;
+  const marcos = gastos.map(g => { acumulado += g.valor; return { ...g, alvo:acumulado }; });
+
+  const pctTotal = custoTotal>0 ? Math.min(mediaMes/custoTotal*100,100) : 0;
+  const cobertos = marcos.filter(m => mediaMes >= m.alvo).length;
+
+  return (
+    <div>
+      {/* resumo no topo */}
+      <div style={{ background:`linear-gradient(135deg, ${T.red}1c, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:14 }}>
+        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Custo de vida mensal</div>
+        <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(custoTotal)}<span style={{ fontSize:13, color:T.textFaint, fontWeight:600 }}>/mês</span></div>
+        <div style={{ marginTop:10, height:8, background:T.cardAlt, borderRadius:5, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${pctTotal}%`, background:pctTotal>=100?T.green:T.amber, borderRadius:5, transition:"width 0.4s" }}/>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", marginTop:6 }}>
+          <span style={{ fontSize:10, color:T.textMute }}>Proventos cobrem <strong style={{ color:pctTotal>=100?T.green:T.amber }}>{pctTotal.toFixed(0)}%</strong></span>
+          <span style={{ fontSize:10, color:T.textMute }}>{fmt(mediaMes)}/mês de proventos</span>
+        </div>
+      </div>
+
+      {/* MARCOS — quanto de provento/mês para cobrir cada gasto */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+        <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>🎯 Marcos de independência</div>
+        <div style={{ fontSize:10, color:T.textFaint, marginBottom:12, lineHeight:1.5 }}>
+          Quanto de provento médio/mês você precisa para cobrir cada gasto (acumulado, do menor ao maior).
+        </div>
+        {marcos.length===0 ? (
+          <div style={{ fontSize:11, color:T.textFaint, textAlign:"center", padding:"12px 0" }}>Defina seus gastos abaixo para ver os marcos.</div>
+        ) : marcos.map((m,i)=>{
+          const coberto = mediaMes >= m.alvo;
+          const falta = Math.max(m.alvo - mediaMes, 0);
+          const prog = Math.min(mediaMes/m.alvo*100,100);
+          return (
+            <div key={m.id} style={{ marginBottom:10, background:coberto?`${T.green}10`:T.cardAlt, border:`1px solid ${coberto?T.green+"44":T.border}`, borderRadius:10, padding:"10px 12px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:15 }}>{coberto?"✅":m.emoji}</span>
+                  <div>
+                    <div style={{ fontSize:12, fontWeight:700, color:coberto?T.green:T.textDim }}>+ {m.label}</div>
+                    <div style={{ fontSize:9, color:T.textFaint }}>precisa de {fmt(m.alvo)}/mês</div>
+                  </div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  {coberto
+                    ? <span style={{ fontSize:11, fontWeight:700, color:T.green }}>Coberto ✓</span>
+                    : <><div style={{ fontSize:12, fontWeight:800, color:T.amber }}>faltam {fmt(falta)}</div><div style={{ fontSize:8, color:T.textFaint }}>de provento/mês</div></>}
+                </div>
+              </div>
+              <div style={{ height:5, background:T.border, borderRadius:3, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${prog}%`, background:coberto?T.green:T.amber, borderRadius:3, transition:"width 0.4s" }}/>
+              </div>
+            </div>
+          );
+        })}
+        {marcos.length>0 && (
+          <div style={{ marginTop:6, fontSize:10, color:T.textMute, textAlign:"center" }}>
+            {cobertos}/{marcos.length} gastos cobertos pelos proventos
+            {cobertos===marcos.length && <span style={{ color:T.green, fontWeight:700 }}> · Independência total! 🎉</span>}
+          </div>
+        )}
+      </div>
+
+      {/* EDITOR dos gastos */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+        <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🧾 Seus gastos fixos</div>
+        {CUSTOS_DEF.map(c=>(
+          <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+            <span style={{ fontSize:16, width:22, textAlign:"center" }}>{c.emoji}</span>
+            <span style={{ flex:1, fontSize:12, color:T.textDim }}>{c.label}</span>
+            <div style={{ display:"flex", alignItems:"center", gap:4, background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:8, padding:"4px 8px" }}>
+              <span style={{ fontSize:10, color:T.textFaint }}>R$</span>
+              <input type="number" min="0" value={custoVida[c.id]||0}
+                onChange={e=>setCustoVida({ ...custoVida, [c.id]: Math.max(0,+e.target.value) })}
+                style={{ width:64, background:"transparent", border:"none", color:T.text, fontSize:13, fontWeight:700, textAlign:"right", outline:"none" }}/>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ background:T.cardAlt, border:`1px dashed ${T.borderSoft}`, borderRadius:10, padding:"10px 12px" }}>
+        <div style={{ fontSize:10, color:T.textFaint, lineHeight:1.6 }}>
+          💡 Esses marcos conversam com a aba <strong style={{ color:T.textMute }}>🤖 Cenário</strong>: simule reinvestimentos lá para ver em quanto tempo seu provento médio alcança cada gasto daqui.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ABA CARTÃO — jornada em 3 fases para ficar sem cartão de crédito tradicional
+// + limite garantido por ativos
+// ════════════════════════════════════════════════════════════════════════════
+function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvisionados, setFundosProvisionados, T }) {
+  const patrimonio = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  // ativos "garantidores": renda fixa / tesouro (mais seguros como garantia de crédito)
+  const ativosGarantia = ativos.filter(a => /tesouro|kncr|cpts|rbry|irim|mxrf/i.test(a.ticker+a.nome));
+  const valorGarantia = ativosGarantia.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+
+  const custoTotal = Object.values(custoVida).reduce((s,v)=>s+(+v||0),0);
+  // limite garantido = fundos provisionados (R$3.000) — base da estratégia
+  const limiteGarantido = +fundosProvisionados || 0;
+
+  // ── 3 FASES ──────────────────────────────────────────────────────────────
+  // Fase 1: proventos cobrem o custo de vida básico (você não depende de crédito p/ viver)
+  // Fase 2: montar a garantia provisionada (meta R$3.000)
+  // Fase 3: cartão garantido por ativos ativo (liberdade do crédito tradicional)
+  const META_GARANTIA = 3000;
+  const fase1ok = custoTotal>0 && mediaMes >= custoTotal;
+  const fase2ok = limiteGarantido >= META_GARANTIA;
+  const fase3ok = fase1ok && fase2ok;
+  const fasesOk = [fase1ok, fase2ok, fase3ok].filter(Boolean).length;
+
+  const FASES = [
+    { n:1, cor:"#ef4444", titulo:"Cobrir o básico", desc:"Seus proventos pagam o custo de vida sem precisar de crédito",
+      ok:fase1ok, prog: custoTotal>0 ? Math.min(mediaMes/custoTotal*100,100) : 0,
+      detalhe: custoTotal>0 ? `${fmt(mediaMes)} de ${fmt(custoTotal)}/mês` : "Defina seu custo de vida abaixo" },
+    { n:2, cor:"#f59e0b", titulo:"Montar garantia", desc:"Provisionar R$3.000 em ativos seguros como lastro do limite",
+      ok:fase2ok, prog: Math.min(limiteGarantido/META_GARANTIA*100,100),
+      detalhe: `${fmt(limiteGarantido)} de ${fmt(META_GARANTIA)}` },
+    { n:3, cor:"#22c55e", titulo:"Cartão por ativos", desc:"Limite garantido pelos seus ativos — sem dívida rotativa",
+      ok:fase3ok, prog: fase3ok?100:0,
+      detalhe: fase3ok ? "Liberdade conquistada!" : "Conclua as fases 1 e 2" },
+  ];
+
+  return (
+    <div>
+      {/* AVISO EXPLÍCITO — proibido cartão de crédito */}
+      <div style={{ background:"rgba(239,68,68,0.14)", border:`2px solid #ef4444`, borderRadius:14, padding:"14px 16px", marginBottom:14, textAlign:"center" }}>
+        <div style={{ fontSize:26, marginBottom:4 }}>🚫💳</div>
+        <div style={{ fontSize:14, fontWeight:800, color:"#ef4444" }}>PROIBIDO CARTÃO DE CRÉDITO</div>
+        <div style={{ fontSize:10, color:T.textMute, marginTop:4, lineHeight:1.5 }}>
+          A meta é nunca usar crédito rotativo. O único crédito permitido no futuro é o <strong style={{ color:T.text }}>garantido pelos seus próprios ativos</strong>.
+        </div>
+      </div>
+
+      {/* JORNADA 3 FASES */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px 14px", marginBottom:14 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>🎯 Jornada: liberdade do crédito</div>
+          <span style={{ fontSize:11, fontWeight:800, color: fasesOk===3?T.green:T.accentSoft }}>{fasesOk}/3 fases</span>
+        </div>
+
+        {/* setas das fases (estilo trilha de metas) */}
+        <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+          {FASES.map(f=>(
+            <div key={f.n} style={{ flex:1, opacity:f.ok?1:0.4, transition:"opacity 0.3s" }}>
+              <div style={{
+                background:f.ok?f.cor:T.borderSoft, borderRadius:"6px 6px 0 0",
+                clipPath:"polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%)",
+                height:38, display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:6
+              }}>
+                <span style={{ fontSize:14, fontWeight:800, color:"#fff" }}>{f.ok?"✓":f.n}</span>
+              </div>
+              <div style={{ fontSize:8, fontWeight:700, color:f.ok?f.cor:T.textFaint, textAlign:"center", marginTop:4, lineHeight:1.2 }}>{f.titulo}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* detalhe de cada fase */}
+        {FASES.map(f=>(
+          <div key={f.n} style={{ marginBottom:10, background:f.ok?`${f.cor}10`:T.cardAlt, border:`1px solid ${f.ok?f.cor+"44":T.border}`, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+              <span style={{ fontSize:12, fontWeight:700, color:f.ok?f.cor:T.textDim }}>
+                {f.ok?"✓ ":""}Fase {f.n} · {f.titulo}
+              </span>
+              <span style={{ fontSize:10, fontWeight:700, color:f.ok?f.cor:T.textMute }}>{f.prog.toFixed(0)}%</span>
+            </div>
+            <div style={{ fontSize:9, color:T.textFaint, marginBottom:6 }}>{f.desc}</div>
+            <div style={{ height:6, background:T.border, borderRadius:4, overflow:"hidden", marginBottom:4 }}>
+              <div style={{ height:"100%", width:`${f.prog}%`, background:f.cor, borderRadius:4, transition:"width 0.4s" }}/>
+            </div>
+            <div style={{ fontSize:10, color:T.textMute, textAlign:"right" }}>{f.detalhe}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* CUSTO DE VIDA — resumo (edição completa na aba Custo Vida) */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>🧾 Custo de vida</div>
+          <span style={{ fontSize:14, fontWeight:800, color:T.red }}>{fmt(custoTotal)}/mês</span>
+        </div>
+        <div style={{ marginTop:8, padding:"10px 12px", borderRadius:10, background: mediaMes>=custoTotal ? `${T.green}12` : `${T.amber}12`, border:`1px solid ${mediaMes>=custoTotal?T.green:T.amber}44` }}>
+          <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+            <span style={{ fontSize:16, fontWeight:800, color:mediaMes>=custoTotal?T.green:T.amber }}>
+              {custoTotal>0 ? Math.min(mediaMes/custoTotal*100,100).toFixed(0) : 0}%
+            </span>
+            <span style={{ fontSize:11, color:T.textMute }}>coberto pelos proventos</span>
+          </div>
+          {custoTotal>mediaMes && (
+            <div style={{ fontSize:10, color:T.amber, marginTop:3 }}>Faltam {fmt(custoTotal-mediaMes)}/mês de proventos para a independência</div>
+          )}
+        </div>
+        <div style={{ fontSize:9, color:T.textFaint, marginTop:8, textAlign:"center" }}>Edite seus gastos e veja os marcos na aba 🧾 Custo Vida</div>
+      </div>
+
+      {/* GARANTIA / LIMITE POR ATIVOS */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+        <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>💎 Limite garantido por ativos</div>
+
+        <div style={{ fontSize:11, color:T.textDim, marginBottom:6 }}>Fundos provisionados como garantia (R$)</div>
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:12 }}>
+          <input type="number" min="0" step="100" value={fundosProvisionados}
+            onChange={e=>setFundosProvisionados(Math.max(0,+e.target.value))}
+            style={{ flex:1, background:T.cardAlt, border:`2px solid ${T.green}`, borderRadius:10, color:T.text, padding:"10px 14px", fontSize:18, fontWeight:800, textAlign:"center" }}/>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Limite disponível</div>
+            <div style={{ fontSize:15, fontWeight:800, color:T.green }}>{fmt(limiteGarantido)}</div>
+          </div>
+          <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Ativos seguros (lastro)</div>
+            <div style={{ fontSize:15, fontWeight:800, color:T.cyan }}>{fmt(valorGarantia)}</div>
+          </div>
+        </div>
+        <div style={{ fontSize:10, color:T.textFaint, marginTop:10, lineHeight:1.6 }}>
+          💡 A ideia: usar parte dos dividendos para provisionar uma garantia. Com ela, o limite vem dos seus próprios ativos (ex: Tesouro, FIIs de papel) — crédito planejado para compras pensadas em meses, <strong style={{ color:T.textMute }}>sem juros de cartão</strong>.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
 // PAINEL DE CONFIGURAÇÕES (engrenagem)
 // ════════════════════════════════════════════════════════════════════════════
-function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, onClose }) {
+function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, onLimparDados, onExportar, onImportar, onClose }) {
   const Secao = ({ titulo, children }) => (
     <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:11,color:T.textMute,textTransform:"uppercase",letterSpacing:1,marginBottom:10,fontWeight:700 }}>{titulo}</div>
@@ -1077,6 +2390,39 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
           </div>
         </Secao>
 
+        {/* DADOS — salvamento automático */}
+        <Secao titulo="💾 Dados">
+          <div style={{ background:`${T.green}10`, border:`1px solid ${T.green}33`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+              <span style={{ fontSize:16 }}>✓</span>
+              <div style={{ fontSize:11, color:T.green, fontWeight:700 }}>Salvamento automático ativado</div>
+            </div>
+            <div style={{ fontSize:10, color:T.textMute, marginTop:4, lineHeight:1.5 }}>
+              Suas edições de ativos, meta e preferências ficam gravadas no aparelho e voltam ao reabrir o app.
+            </div>
+          </div>
+          {/* backup */}
+          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+            <button onClick={onExportar} style={{
+              flex:1, padding:"10px", borderRadius:10, cursor:"pointer",
+              border:`1px solid ${T.green}55`, background:`${T.green}12`, color:T.green, fontSize:12, fontWeight:600
+            }}>⬇️ Exportar backup</button>
+            <button onClick={onImportar} style={{
+              flex:1, padding:"10px", borderRadius:10, cursor:"pointer",
+              border:`1px solid ${T.cyan}55`, background:`${T.cyan}12`, color:T.cyan, fontSize:12, fontWeight:600
+            }}>⬆️ Importar backup</button>
+          </div>
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
+            Exporta um arquivo com todos os seus dados (ativos, meta, custo de vida). Guarde-o para restaurar se trocar de aparelho ou reinstalar.
+          </div>
+          <button onClick={onLimparDados} style={{
+            width:"100%", padding:"10px", borderRadius:10, cursor:"pointer",
+            border:`1px solid ${T.red}55`, background:`${T.red}12`, color:T.red, fontSize:12, fontWeight:600
+          }}>
+            🗑️ Limpar dados salvos (voltar ao original)
+          </button>
+        </Secao>
+
         {/* RESET + FECHAR */}
         <div style={{ display:"flex",gap:8,marginTop:8 }}>
           <button onClick={()=>{ setTemaId("padrao"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); }}
@@ -1100,21 +2446,45 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
 // APP PRINCIPAL
 // ════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [temaId, setTemaId] = useState("padrao");
-  const [ativos, setAtivos] = useState(ATIVOS_INICIAIS.map(a=>({...a})));
+  const [temaId, setTemaId] = useEstadoSalvo("tema", "padrao");
+  const [ativos, setAtivos] = useState(carregarAtivos);
   const [filtro, setFiltro] = useState("TUDO");
   const [mesSel, setMesSel] = useState(0);
-  const [aba,    setAba]    = useState("grafico");
+  const [aba,    setAba]    = useState("painel");
+  const [menuAberto, setMenuAberto] = useState(false);
 
-  // ── CONFIGURAÇÕES (engrenagem) ──────────────────────────────────────────
+  // ── CONFIGURAÇÕES (engrenagem) — todas salvas na memória ────────────────
   const [showConfig, setShowConfig] = useState(false);
-  const [layout,   setLayout]   = useState("celular");  // "celular" | "tv"
-  const [fontEsc,  setFontEsc]  = useState(1);          // 0.85 | 1 | 1.15 | 1.35
-  const [densidade,setDensidade]= useState("confortavel"); // "compacto" | "confortavel"
+  const [layout,   setLayout]   = useEstadoSalvo("layout", "celular");  // "celular" | "tv"
+  const [fontEsc,  setFontEsc]  = useEstadoSalvo("fonte", 1);           // 0.85 | 1 | 1.15 | 1.35
+  const [densidade,setDensidade]= useEstadoSalvo("densidade", "confortavel"); // "compacto" | "confortavel"
 
-  // ── META DE PROVENTOS (trilha de progressão) ────────────────────────────
-  const [metaMensal, setMetaMensal] = useState(500);    // meta de provento médio/mes
+  // ── META DE PROVENTOS (trilha de progressão) — salva na memória ─────────
+  const [metaMensal, setMetaMensal] = useEstadoSalvo("meta", 500);    // meta de provento médio/mes
   const [showMeta,   setShowMeta]   = useState(false);
+
+  // ── CARTÃO / CUSTO DE VIDA — salvos na memória ──────────────────────────
+  const [custoVida, setCustoVida] = useEstadoSalvo("custoVida", { agua:100, luz:200, condominio:0, aluguel:1000, internet:120, outros:0 });
+  const [fundosProvisionados, setFundosProvisionados] = useEstadoSalvo("fundosProv", 3000);
+
+  // ── HISTÓRICO REAL — retrato mensal da carteira (salvo na memória) ──────
+  const [historico, setHistorico] = useEstadoSalvo("historico", []);
+
+  // salva os ativos sempre que forem editados (merge é feito só na carga)
+  useEffect(() => { gravarSalvo("ativos", ativos); }, [ativos]);
+
+  // grava/atualiza o retrato do mês atual ao abrir o app (1 por mês)
+  useEffect(() => {
+    const mesAtual = new Date().toISOString().slice(0,7); // AAAA-MM
+    const patrimonio = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+    const divAnual = ativos.reduce((s,a)=>s+a.prov*a.meses.length*a.qtd,0);
+    setHistorico(prev => {
+      const semAtual = (prev||[]).filter(h=>h.mes!==mesAtual);
+      return [...semAtual, { mes:mesAtual, data:new Date().toISOString(),
+        patrimonio:+patrimonio.toFixed(2), divAnual:+divAnual.toFixed(2) }]
+        .sort((a,b)=>a.mes.localeCompare(b.mes));
+    });
+  }, []); // só ao montar
 
   const T = TEMAS[temaId];
   const ehTV = layout === "tv";
@@ -1153,12 +2523,25 @@ export default function App() {
     {id:"FII", emoji:"🏢",label:"Só FIIs",  sub:`${ativos.filter(a=>a.cat==="FII").length} fundos`, cor:T.cyan},
     {id:"Ação",emoji:"📈",label:"Só Ações", sub:`${ativos.filter(a=>a.cat==="Ação").length} ações`, cor:T.accent},
   ];
-  const ABAS = [
-    {id:"grafico", label:"📈 Gráfico"},
-    {id:"ranking", label:"🏆 Ranking"},
-    {id:"cenario", label:"🤖 Cenário"},
-    {id:"editar",  label:"✏️ Editar"},
+  // navegação organizada em seções (para a gaveta lateral)
+  const SECOES = [
+    { titulo:"Visão geral", itens:[
+      {id:"painel",     label:"Painel",      emoji:"📊", desc:"Visão rápida da carteira"},
+      {id:"analises",   label:"Análises",    emoji:"🔬", desc:"Gráfico detalhado + saúde"},
+      {id:"calendario", label:"Calendário",  emoji:"📅", desc:"Quando cada um paga"},
+      {id:"ranking",    label:"Ranking",     emoji:"🏆", desc:"Proventos e valorização"},
+    ]},
+    { titulo:"Planejamento", itens:[
+      {id:"cenario",    label:"Cenário",     emoji:"🤖", desc:"Simular reinvestimento"},
+      {id:"custovida",  label:"Custo de Vida",emoji:"🧾",desc:"Gastos e marcos"},
+      {id:"cartao",     label:"Cartão",      emoji:"💳", desc:"Jornada sem crédito"},
+    ]},
+    { titulo:"Gerenciar", itens:[
+      {id:"editar",     label:"Editar ativos",emoji:"✏️",desc:"Quantidades e cotações"},
+    ]},
   ];
+  const TODAS_ABAS = SECOES.flatMap(s=>s.itens);
+  const abaAtual = TODAS_ABAS.find(a=>a.id===aba) || TODAS_ABAS[0];
 
   return (
     <div style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:48,transition:"background 0.3s" }}>
@@ -1178,10 +2561,18 @@ export default function App() {
 
       {/* HEADER */}
       <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "12px 12px" : "16px 16px",borderBottom:`1px solid ${T.border}` }}>
-        {/* linha superior: título + engrenagem */}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10 }}>
-          <div style={{ fontSize:10,color:T.accent,letterSpacing:2,textTransform:"uppercase",paddingTop:6 }}>
-            💰 Carteira Proventos {ehTV && <span style={{ color:T.green }}>· TV</span>}
+        {/* linha superior: menu + título + engrenagem */}
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            {/* HAMBÚRGUER — abre a gaveta */}
+            <button onClick={()=>setMenuAberto(true)} title="Menu" style={{
+              width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
+              background:T.cardAlt,cursor:"pointer",fontSize:17,padding:0,
+              display:"flex",alignItems:"center",justifyContent:"center",color:T.text
+            }}>☰</button>
+            <div style={{ fontSize:10,color:T.accent,letterSpacing:2,textTransform:"uppercase" }}>
+              💰 Carteira {ehTV && <span style={{ color:T.green }}>· TV</span>}
+            </div>
           </div>
           {/* ENGRENAGEM — abre configurações */}
           <button onClick={()=>setShowConfig(true)} title="Configurações" style={{
@@ -1190,17 +2581,20 @@ export default function App() {
             display:"flex",alignItems:"center",justifyContent:"center"
           }}>⚙️</button>
         </div>
-        <div style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1 }}>{fmt(totalAnual)}<span style={{ fontSize:12,color:T.textFaint,fontWeight:400,marginLeft:8 }}>/ ano base</span></div>
-        <div style={{ display:"flex",gap:8,marginTop:10,flexWrap:"wrap" }}>
+        {/* MODO FOCO — esconde KPIs e meta nas telas de trabalho */}
+        {!["editar","cartao","custovida"].includes(aba) && (<>
+        <div style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1 }}>{fmt(totalAnual)}<span style={{ fontSize:12,color:T.textFaint,fontWeight:400,marginLeft:8 }}>/ ano · total</span></div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:6,marginTop:10 }}>
           {[
             {l:"Média/mês",v:fmt(mediaMes),c:T.accentSoft},
             {l:"Maior mês",v:fmt(maxMes),  c:T.green},
             {l:"Menor mês",v:fmt(minMes),  c:T.red},
             {l:"FIIs/ano", v:fmt(totFII),  c:T.cyan},
             {l:"Ações/ano",v:fmt(totAcao), c:T.accent},
+            {l:"Por mês",  v:fmt(totalAnual/12), c:T.textDim},
           ].map(x=>(
-            <div key={x.l} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"5px 10px" }}>
-              <div style={{ fontSize:9,color:T.textFaint }}>{x.l}</div>
+            <div key={x.l} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 8px" }}>
+              <div style={{ fontSize:8,color:T.textFaint }}>{x.l}</div>
               <div style={{ fontSize:11,fontWeight:700,color:x.c }}>{x.v}</div>
             </div>
           ))}
@@ -1208,6 +2602,7 @@ export default function App() {
 
         {/* TRILHA DE METAS — progressão por estágios */}
         <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} onConfigurar={()=>setShowMeta(true)} T={T} />
+        </>)}
       </div>
 
       {/* MODAL DEFINIR META */}
@@ -1223,43 +2618,160 @@ export default function App() {
           layout={layout} setLayout={setLayout}
           fontEsc={fontEsc} setFontEsc={setFontEsc}
           densidade={densidade} setDensidade={setDensidade}
+          onLimparDados={()=>{
+            if(window.confirm("Apagar TODOS os dados salvos (ativos editados, meta e preferências) e voltar ao original? Isso não pode ser desfeito.")){
+              try { Object.keys(localStorage).filter(k=>k.startsWith(PREFIXO)).forEach(k=>localStorage.removeItem(k)); } catch {}
+              setAtivos(ATIVOS_INICIAIS.map(a=>({...a})));
+              setTemaId("padrao"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); setMetaMensal(500);
+              setShowConfig(false);
+            }
+          }}
+          onExportar={()=>{
+            const backup = {
+              app:"CarteiraProventos", versao:"1.9.0", data:new Date().toISOString(),
+              ativos, meta:metaMensal, custoVida, fundosProvisionados,
+              tema:temaId, layout, fonte:fontEsc, densidade,
+            };
+            try {
+              const blob = new Blob([JSON.stringify(backup,null,2)], { type:"application/json" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              const hoje = new Date().toISOString().slice(0,10);
+              a.href = url; a.download = `carteira-backup-${hoje}.json`;
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            } catch(e){ window.alert("Não foi possível exportar neste ambiente. No APK funciona normalmente."); }
+          }}
+          onImportar={()=>{
+            try {
+              const input = document.createElement("input");
+              input.type = "file"; input.accept = "application/json,.json";
+              input.onchange = (ev) => {
+                const file = ev.target.files?.[0]; if(!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  try {
+                    const d = JSON.parse(reader.result);
+                    if(!d || !Array.isArray(d.ativos)) { window.alert("Arquivo inválido."); return; }
+                    if(!window.confirm("Importar este backup vai substituir seus dados atuais. Continuar?")) return;
+                    setAtivos(d.ativos);
+                    if(d.meta!=null) setMetaMensal(d.meta);
+                    if(d.custoVida) setCustoVida(d.custoVida);
+                    if(d.fundosProvisionados!=null) setFundosProvisionados(d.fundosProvisionados);
+                    if(d.tema) setTemaId(d.tema);
+                    if(d.layout) setLayout(d.layout);
+                    if(d.fonte) setFontEsc(d.fonte);
+                    if(d.densidade) setDensidade(d.densidade);
+                    setShowConfig(false);
+                    window.alert("Backup importado com sucesso!");
+                  } catch { window.alert("Não foi possível ler o arquivo."); }
+                };
+                reader.readAsText(file);
+              };
+              input.click();
+            } catch(e){ window.alert("Importação indisponível neste ambiente. No APK funciona normalmente."); }
+          }}
           onClose={()=>setShowConfig(false)}
         />
       )}
 
-      <div style={{ padding:"14px" }}>
-        {/* FILTROS — ocultos no cenário e editar */}
-        {(aba==="grafico"||aba==="ranking") && (
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Modo de visualização</div>
-            <div style={{ display:"flex",gap:8 }}>
-              {FILTROS.map(f=>{
-                const sel=filtro===f.id;
-                return (
-                  <button key={f.id} onClick={()=>{setFiltro(f.id);setMesSel(0);}} style={{ flex:"1 1 0",padding:"8px 4px",borderRadius:12,border:`2px solid ${sel?f.cor:T.border}`,background:sel?`${f.cor}14`:T.card,cursor:"pointer",textAlign:"center" }}>
-                    <div style={{ fontSize:16,marginBottom:2 }}>{f.emoji}</div>
-                    <div style={{ fontSize:11,fontWeight:700,color:sel?f.cor:T.textMute }}>{f.label}</div>
-                    <div style={{ fontSize:9,color:T.textFaint }}>{f.sub}</div>
-                  </button>
-                );
-              })}
+      {/* GAVETA LATERAL — navegação */}
+      {menuAberto && (
+        <div onClick={()=>setMenuAberto(false)} style={{ position:"fixed", inset:0, background:"#000a", zIndex:1050, display:"flex" }}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            width:"82%", maxWidth:320, height:"100%", background:T.bg, borderRight:`1px solid ${T.borderSoft}`,
+            boxShadow:"4px 0 30px #000a", overflowY:"auto", display:"flex", flexDirection:"column"
+          }}>
+            {/* cabeçalho da gaveta */}
+            <div style={{ padding:"18px 16px 14px", borderBottom:`1px solid ${T.border}`, background:T.bgHeader }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontSize:14, fontWeight:800, color:T.text }}>💰 Carteira Proventos</div>
+                <button onClick={()=>setMenuAberto(false)} style={{ width:32,height:32,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:15 }}>✕</button>
+              </div>
+              <div style={{ fontSize:10, color:T.textFaint, marginTop:4 }}>{fmt(totalAnual)}/ano · {fmt(mediaMes)}/mês</div>
             </div>
+
+            {/* seções */}
+            <div style={{ flex:1, padding:"8px 10px" }}>
+              {SECOES.map(sec=>(
+                <div key={sec.titulo} style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1.5, padding:"6px 8px 4px" }}>{sec.titulo}</div>
+                  {sec.itens.map(it=>{
+                    const ativo = aba===it.id;
+                    return (
+                      <button key={it.id} onClick={()=>{ setAba(it.id); setMenuAberto(false); }} style={{
+                        width:"100%", display:"flex", alignItems:"center", gap:12, textAlign:"left",
+                        padding:"11px 12px", marginBottom:2, borderRadius:10, cursor:"pointer",
+                        border:"none", background: ativo?T.accentBg:"transparent",
+                        borderLeft:`3px solid ${ativo?T.accent:"transparent"}`
+                      }}>
+                        <span style={{ fontSize:19 }}>{it.emoji}</span>
+                        <div style={{ flex:1 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color: ativo?T.accentSoft:T.text }}>{it.label}</div>
+                          <div style={{ fontSize:9, color:T.textFaint }}>{it.desc}</div>
+                        </div>
+                        {ativo && <span style={{ fontSize:11, color:T.accent }}>●</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* rodapé: configurações */}
+            <div style={{ padding:"10px 14px 16px", borderTop:`1px solid ${T.border}` }}>
+              <button onClick={()=>{ setMenuAberto(false); setShowConfig(true); }} style={{
+                width:"100%", display:"flex", alignItems:"center", gap:10, padding:"11px 12px",
+                borderRadius:10, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textDim, cursor:"pointer", fontSize:13, fontWeight:600
+              }}>⚙️ Configurações</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div key={aba} className="tela-anim" style={{ padding:"14px" }}>
+        {/* TÍTULO DA TELA ATUAL (substitui a barra de abas) */}
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <span style={{ fontSize:22 }}>{abaAtual.emoji}</span>
+            <div>
+              <div style={{ fontSize:17,fontWeight:800,color:T.text,lineHeight:1.1 }}>{abaAtual.label}</div>
+              <div style={{ fontSize:10,color:T.textFaint }}>{abaAtual.desc}</div>
+            </div>
+          </div>
+          <button onClick={()=>setMenuAberto(true)} style={{ display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:9,border:`1px solid ${T.border}`,background:T.card,color:T.textMute,cursor:"pointer",fontSize:11,fontWeight:600 }}>
+            ☰ Menu
+          </button>
+        </div>
+
+        {/* FILTROS — seletor segmentado (só em gráfico/ranking) */}
+        {(aba==="analises"||aba==="ranking") && (
+          <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:14 }}>
+            {FILTROS.map(f=>{
+              const sel=filtro===f.id;
+              return (
+                <button key={f.id} onClick={()=>{setFiltro(f.id);setMesSel(0);}} style={{ flex:"1 1 0",padding:"8px 4px",borderRadius:7,border:"none",cursor:"pointer",background:sel?`${f.cor}22`:"transparent",textAlign:"center",transition:"background 0.2s" }}>
+                  <span style={{ fontSize:13,marginRight:5 }}>{f.emoji}</span>
+                  <span style={{ fontSize:12,fontWeight:700,color:sel?f.cor:T.textMute }}>{f.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
-        {/* ABAS */}
-        <div style={{ display:"flex",gap:4,marginBottom:12,overflowX:"auto" }}>
-          {ABAS.map(a=>(
-            <button key={a.id} onClick={()=>setAba(a.id)} style={{ flex:"1 1 0",padding:"8px 8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:600,whiteSpace:"nowrap",background:aba===a.id?(a.id==="cenario"?T.green:a.id==="editar"?T.amber:T.accent):T.card,color:aba===a.id?(a.id==="editar"?"#1a1d21":"#fff"):T.textMute }}>{a.label}</button>
-          ))}
-        </div>
+        {/* ABA PAINEL (dashboard) */}
+        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} T={T}/>}
+
+
+        {/* ABA CALENDÁRIO */}
+        {aba==="calendario" && <Calendario ativos={ativos} T={T}/>}
 
         {/* ABA GRÁFICO */}
-        {aba==="grafico" && (
+        {aba==="analises" && (
           <>
             <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 6px 8px",marginBottom:14 }}>
               <div style={{ paddingLeft:8,marginBottom:6,fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1 }}>
-                {filtro==="TUDO"?"Todos os ativos — cada cor = um ativo":filtro==="FII"?"FIIs":"Ações"}
+                {filtro==="TUDO"?"Proventos por mês — cada cor = um ativo":filtro==="FII"?"FIIs":"Ações"}
               </div>
               <ResponsiveContainer width="100%" height={230}>
                 <BarChart data={chartData} margin={{ top:4,right:6,left:0,bottom:0 }} onClick={({activeTooltipIndex})=>{ if(activeTooltipIndex!=null)setMesSel(activeTooltipIndex); }}>
@@ -1290,10 +2802,12 @@ export default function App() {
                 })}
               </div>
             </div>
-            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px" }}>
+            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px",marginBottom:14 }}>
               <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Detalhes do mês · toque em uma barra</div>
               <DetalheMes ativos={ativos} idx={mesSel} filtro={filtro} T={T}/>
             </div>
+            {/* análises de carteira (yield, saúde, benchmarks) */}
+            <AnaliseCarteira ativos={ativos} T={T}/>
           </>
         )}
 
@@ -1305,12 +2819,18 @@ export default function App() {
         )}
 
         {/* ABA CENÁRIO */}
-        {aba==="cenario" && <CenarioFuturo ativos={ativos} T={T}/>}
+        {aba==="cenario" && <CenarioFuturo ativos={ativos} fundosProvisionados={fundosProvisionados} T={T}/>}
+
+        {/* ABA CUSTO DE VIDA */}
+        {aba==="custovida" && <CustoVida custoVida={custoVida} setCustoVida={setCustoVida} mediaMes={mediaMes} T={T}/>}
+
+        {/* ABA CARTÃO */}
+        {aba==="cartao" && <CartaoCredito ativos={ativos} mediaMes={mediaMes} custoVida={custoVida} setCustoVida={setCustoVida} fundosProvisionados={fundosProvisionados} setFundosProvisionados={setFundosProvisionados} T={T}/>}
 
         {/* ABA EDITAR */}
         {aba==="editar" && <EditarAtivos ativos={ativos} setAtivos={setAtivos} T={T}/>}
 
-        {(aba==="grafico"||aba==="ranking") && (
+        {(aba==="analises"||aba==="ranking") && (
           <div style={{ background:T.cardAlt,border:`1px dashed ${T.borderSoft}`,borderRadius:10,padding:"10px 12px",marginTop:14 }}>
             <div style={{ fontSize:10,color:T.textFaint,lineHeight:1.7 }}>📌 FIIs pagam mensalmente. Ações seguem calendário histórico. Valores brutos — JCP têm IR 15%; FIIs isentos para PF.</div>
           </div>
@@ -1323,3 +2843,4 @@ export default function App() {
     </div>
   );
 }
+
