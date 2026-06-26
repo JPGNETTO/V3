@@ -98,6 +98,35 @@ function labelMes(offset) {
 const fmt  = v => v.toLocaleString("pt-BR", { style:"currency", currency:"BRL" });
 const fmtK = v => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : fmt(v);
 
+// ── IMPORTAÇÃO EM MASSA — lê texto colado tipo "BBAS3 291 20,55" ──────────
+// Aceita: TICKER QTD [PREÇO_MÉDIO] [COTAÇÃO], com vírgula ou ponto decimal.
+function parseNumBR(s) {
+  if (s == null) return NaN;
+  s = String(s).replace(/[R$\s]/g, "");
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", "."); // formato BR: 1.234,56
+  return parseFloat(s);
+}
+function parseImportacao(txt) {
+  const linhas = String(txt||"").split(/\n+/).map(l=>l.trim()).filter(Boolean);
+  const itens = [];
+  for (const l of linhas) {
+    const m = l.match(/([A-Za-z]{4}\d{1,2})/); // ticker tipo BBAS3, MFII11
+    if (!m) { itens.push({ raw:l, erro:true }); continue; }
+    const ticker = m[1].toUpperCase();
+    const resto = l.slice(l.indexOf(m[1]) + m[1].length);
+    const nums = (resto.match(/[\d.,]+/g) || []).map(parseNumBR).filter(n=>!isNaN(n));
+    if (nums.length === 0) { itens.push({ raw:l, ticker, erro:true }); continue; }
+    itens.push({
+      ticker,
+      qtd:        nums[0] != null ? Math.round(nums[0]) : null,
+      precoMedio: nums[1] != null ? nums[1] : null,
+      cotacao:    nums[2] != null ? nums[2] : null,
+    });
+  }
+  return itens;
+}
+
+
 // Grupo de exibição (para listas agrupadas e expansíveis). NÃO altera o campo
 // 'cat' do ativo (que continua alimentando gráficos e filtros) — é só para exibir.
 function grupoDe(a) {
@@ -509,7 +538,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
         const destaque = candidatos[hoje.getDate() % candidatos.length];
 
         return (
-          <div style={{ marginBottom:14 }}>
+          <div style={{ marginBottom:20 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
               <span style={{ fontSize:15, fontWeight:800, color:T.text }}>{saud}! 👋</span>
               <span style={{ fontSize:11, color:T.textFaint }}>{dataFmt}</span>
@@ -526,7 +555,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
       })()}
 
       {/* mini-abas internas do Painel */}
-      <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:14 }}>
+      <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:20 }}>
         {MINI.map(m=>{
           const sel = vista===m.id;
           return (
@@ -554,20 +583,23 @@ function PainelCarteira({ ativos, historico = [], T }) {
         const esteTot = esteList.reduce((s,p)=>s+p.valor,0);
         const proxTot = proxList.reduce((s,p)=>s+p.valor,0);
         return (
-          <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <div style={{ marginBottom:18 }}>
+            <div style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:10 }}>📆 Proventos a receber</div>
+            <div style={{ display:"flex", gap:10 }}>
             {/* este mês */}
-            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.green}22, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"13px 14px" }}>
+            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.green}22, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"15px 15px 16px" }}>
               <div style={{ fontSize:9, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>📥 Este mês</div>
-              <div style={{ fontSize:9, color:T.textFaint, marginBottom:3 }}>{NOMES_MES[mAtual-1]}</div>
-              <div style={{ fontSize:20, fontWeight:800, color:T.green, letterSpacing:-0.5 }}>{fmt(esteTot)}</div>
-              <div style={{ fontSize:9, color:T.textMute, marginTop:2 }}>{esteList.length} ativo{esteList.length!==1?"s":""} pagando</div>
+              <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mAtual-1]}</div>
+              <div style={{ fontSize:22, fontWeight:800, color:T.green, letterSpacing:-0.5 }}>{fmt(esteTot)}</div>
+              <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{esteList.length} ativo{esteList.length!==1?"s":""} pagando</div>
             </div>
             {/* próximo mês */}
-            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.accent}44`, borderRadius:14, padding:"13px 14px" }}>
+            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.accent}44`, borderRadius:14, padding:"15px 15px 16px" }}>
               <div style={{ fontSize:9, color:T.accentSoft, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>📅 Próximo mês</div>
-              <div style={{ fontSize:9, color:T.textFaint, marginBottom:3 }}>{NOMES_MES[mProx-1]}</div>
-              <div style={{ fontSize:20, fontWeight:800, color:T.accentSoft, letterSpacing:-0.5 }}>{fmt(proxTot)}</div>
-              <div style={{ fontSize:9, color:T.textMute, marginTop:2 }}>{proxList.length} ativo{proxList.length!==1?"s":""} pagando</div>
+              <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mProx-1]}</div>
+              <div style={{ fontSize:22, fontWeight:800, color:T.accentSoft, letterSpacing:-0.5 }}>{fmt(proxTot)}</div>
+              <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{proxList.length} ativo{proxList.length!==1?"s":""} pagando</div>
+            </div>
             </div>
           </div>
         );
@@ -582,7 +614,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
         const temDados = dataMes.some(d=>d.total>0);
         if (!temDados) return null;
         return (
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 8px", marginBottom:12 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 8px", marginBottom:16 }}>
             <div style={{ paddingLeft:8, marginBottom:8, fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>💵 Proventos mês a mês</div>
             <div style={{ width:"100%", height:150 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -601,7 +633,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
       })()}
 
       {/* resumo geral */}
-      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:12 }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:16 }}>
         <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Patrimônio atual</div>
         <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(totalAtual)}</div>
         <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
@@ -625,7 +657,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
       {/* ═══ VISTA: HISTÓRICO ═══ */}
       {vista==="historico" && (
         historico.length>0 ? (
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 12px", marginBottom:12 }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 12px", marginBottom:16 }}>
           <div style={{ paddingLeft:8, marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>🕒 Histórico real</div>
             <span style={{ fontSize:9, color:T.textFaint }}>{historico.length} mês{historico.length>1?"es":""} registrado{historico.length>1?"s":""}</span>
@@ -677,7 +709,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
           }}>{f.label}</button>
         ))}
       </div>
-      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+      <div style={{ display:"flex", gap:8, marginBottom:20 }}>
         <div style={{ flex:1, display:"flex", gap:4, background:T.card, borderRadius:8, padding:3 }}>
           {[{id:"cat",l:"Por categoria"},{id:"setor",l:"Por setor"}].map(o=>(
             <button key={o.id} onClick={()=>setAgrupar(o.id)} style={{ flex:1, padding:"6px 4px", borderRadius:6, border:"none", cursor:"pointer", fontSize:10, fontWeight:700, background:agrupar===o.id?T.accentBg:"transparent", color:agrupar===o.id?T.accentSoft:T.textMute }}>{o.l}</button>
@@ -691,7 +723,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
       </div>
 
       {/* PIZZA — composição */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:16 }}>
         <div style={{ fontSize:11, color:T.textMute, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>
           Composição {agrupar==="cat"?"por categoria":"por setor"}
         </div>
@@ -727,8 +759,8 @@ function PainelCarteira({ ativos, historico = [], T }) {
       </div>
 
       {/* BARRAS — dinheiro por grupo */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
-        <div style={{ fontSize:11, color:T.textMute, marginBottom:12, textTransform:"uppercase", letterSpacing:1 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:16 }}>
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:16, textTransform:"uppercase", letterSpacing:1 }}>
           {metrica==="atual"?"Valor atual":"Investido"} por {agrupar==="cat"?"categoria":"setor"}
         </div>
         {arr.map(g=>{
@@ -775,7 +807,7 @@ function AnaliseCarteira({ ativos, T }) {
   return (
     <>
       {/* yields */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:16 }}>
         <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>📈 Rendimento da carteira</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
           <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px" }}>
@@ -809,7 +841,7 @@ function AnaliseCarteira({ ativos, T }) {
       </div>
 
       {/* saúde / diversificação */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:12 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:16 }}>
         <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🩺 Saúde da carteira</div>
         <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
           <div style={{ flex:1, minWidth:100, background:T.cardAlt, borderRadius:10, padding:"10px 12px" }}>
@@ -862,7 +894,7 @@ function Calendario({ ativos, T }) {
 
   return (
     <div>
-      <div style={{ background:`linear-gradient(135deg, ${T.cyan}1c, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 16px", marginBottom:12 }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.cyan}1c, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 16px", marginBottom:16 }}>
         <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>📅 Calendário de proventos · 12 meses</div>
         <div style={{ fontSize:24, fontWeight:800, color:T.text }}>{fmt(totalAno)}<span style={{ fontSize:12, color:T.textFaint, fontWeight:600 }}>/ano</span></div>
         <div style={{ fontSize:10, color:T.textMute, marginTop:2 }}>Maior mês: <strong style={{ color:T.green }}>{meses[mesAtualIdx].label}</strong> ({fmt(meses[mesAtualIdx].total)})</div>
@@ -930,7 +962,7 @@ function Ranking({ ativos, T }) {
   return (
     <div>
       {/* toggle proventos / valorização */}
-      <div style={{ display:"flex", gap:4, background:T.card, borderRadius:10, padding:3, marginBottom:14 }}>
+      <div style={{ display:"flex", gap:4, background:T.card, borderRadius:10, padding:3, marginBottom:20 }}>
         {[{id:"proventos",l:"💰 Proventos"},{id:"valorizacao",l:"📈 Valorização"}].map(o=>(
           <button key={o.id} onClick={()=>setModo(o.id)} style={{ flex:1, padding:"8px 4px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:modo===o.id?T.accent:"transparent", color:modo===o.id?"#fff":T.textMute }}>{o.l}</button>
         ))}
@@ -938,7 +970,7 @@ function Ranking({ ativos, T }) {
 
       {modo==="proventos" ? (
         <>
-          <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:12 }}>Ranking anual de proventos · {fmt(totalProv)}</div>
+          <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:16 }}>Ranking anual de proventos · {fmt(totalProv)}</div>
           {rankedProv.map((a,i)=>{
             const c = corDe(a.ticker,a.cat,T);
             return (
@@ -965,7 +997,7 @@ function Ranking({ ativos, T }) {
       ) : (
         <>
           <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>Valorização desde o preço médio</div>
-          <div style={{ fontSize:10,color:T.textFaint,marginBottom:12,lineHeight:1.5 }}>Quanto cada ativo subiu ou caiu em relação ao que você pagou. Atualize as cotações na aba Editar para acompanhar mês a mês.</div>
+          <div style={{ fontSize:10,color:T.textFaint,marginBottom:16,lineHeight:1.5 }}>Quanto cada ativo subiu ou caiu em relação ao que você pagou. Atualize as cotações na aba Editar para acompanhar mês a mês.</div>
           {rankedVal.map((a,i)=>{
             const pos = a.pctVal>=0;
             const cor = pos?T.green:T.red;
@@ -1005,10 +1037,294 @@ function Ranking({ ativos, T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // ABA EDITAR ATIVOS
 // ════════════════════════════════════════════════════════════════════════════
-function EditarAtivos({ ativos, setAtivos, T }) {
+// ════════════════════════════════════════════════════════════════════════════
+// ASSISTENTE IA — chat conectado ao seu AI Bridge / Ollama (Gemma) local
+// ════════════════════════════════════════════════════════════════════════════
+function Assistente({ ativos, setAtivos, T }) {
+  const [urlServidor, setUrlServidor] = useEstadoSalvo("aiUrl", "http://100.100.195.84:4000");
+  const [mensagens, setMensagens] = useState([]); // {role, content, acao?}
+  const [input, setInput] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [status, setStatus] = useState("desconhecido"); // online | offline | desconhecido
+  const [showCfg, setShowCfg] = useState(false);
+  const fimRef = useRef(null);
+
+  useLayoutEffect(()=>{ fimRef.current?.scrollIntoView({ behavior:"smooth" }); }, [mensagens, carregando]);
+
+  // testa se o servidor está vivo (rota /ping)
+  async function testar() {
+    setStatus("desconhecido");
+    try {
+      const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), 6000);
+      const r = await fetch(`${urlServidor.replace(/\/$/,"")}/ping`, { signal:ctrl.signal });
+      clearTimeout(t);
+      setStatus(r.ok ? "online" : "offline");
+    } catch { setStatus("offline"); }
+  }
+
+  // extrai bloco <<ACAO>>{...}<</ACAO>> da resposta
+  function extrairAcao(txt) {
+    const m = txt.match(/<<ACAO>>([\s\S]*?)<<\/ACAO>>/);
+    if (!m) return { texto:txt, acao:null };
+    let acao=null;
+    try { acao = JSON.parse(m[1].trim()); } catch {}
+    return { texto: txt.replace(m[0],"").trim(), acao };
+  }
+
+  async function enviar() {
+    const pergunta = input.trim();
+    if (!pergunta || carregando) return;
+    setInput("");
+    const novas = [...mensagens, { role:"user", content:pergunta }];
+    setMensagens(novas);
+    setCarregando(true);
+    try {
+      const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), 60000);
+      const r = await fetch(`${urlServidor.replace(/\/$/,"")}/chat`, {
+        method:"POST", headers:{ "Content-Type":"application/json" }, signal:ctrl.signal,
+        body: JSON.stringify({
+          pergunta,
+          carteira: ativos.map(a=>({ ticker:a.ticker, nome:a.nome, cat:a.cat, qtd:a.qtd, precoMedio:a.precoMedio, cotacao:a.cotacao, prov:a.prov, setor:a.setor })),
+          historico: mensagens.slice(-6).map(m=>({ role:m.role, content:m.content })),
+        }),
+      });
+      clearTimeout(t);
+      if (!r.ok) throw new Error("servidor");
+      const data = await r.json();
+      setStatus("online");
+      const { texto, acao } = extrairAcao(data.resposta || "(sem resposta)");
+      setMensagens(m=>[...m, { role:"assistant", content:texto, acao }]);
+    } catch (e) {
+      setStatus("offline");
+      setMensagens(m=>[...m, { role:"assistant", content:"⚠️ Não consegui falar com o servidor. Verifique se o PC está ligado, o AI Bridge rodando (porta 4000) e o Tailscale ativo. Toque na engrenagem para conferir o endereço.", erro:true }]);
+    } finally { setCarregando(false); }
+  }
+
+  // aplica a ação proposta pela IA
+  function aplicarAcao(acao) {
+    if (!acao || acao.tipo!=="editar") return;
+    const campos = ["qtd","precoMedio","cotacao","prov"];
+    if (!campos.includes(acao.campo)) return;
+    setAtivos(prev => prev.map(a => a.ticker===String(acao.ticker).toUpperCase()
+      ? { ...a, [acao.campo]: acao.campo==="qtd"?Math.round(+acao.valor): +acao.valor } : a));
+    setMensagens(m=>[...m, { role:"assistant", content:`✓ Pronto! ${acao.ticker}: ${acao.campo} = ${acao.valor}.`, sistema:true }]);
+  }
+
+  const corStatus = status==="online"?T.green : status==="offline"?T.red : T.textFaint;
+  const sugestoes = ["Como está minha carteira?", "Qual meu maior dividendo?", "Quanto recebo este mês?", "Estou diversificado?"];
+
+  return (
+    <div>
+      {/* status do servidor */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"10px 13px", marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ width:9, height:9, borderRadius:"50%", background:corStatus }}/>
+          <span style={{ fontSize:12, color:T.textDim, fontWeight:600 }}>
+            IA local · {status==="online"?"conectado":status==="offline"?"offline":"toque em testar"}
+          </span>
+        </div>
+        <div style={{ display:"flex", gap:6 }}>
+          <button onClick={testar} style={{ padding:"6px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11, fontWeight:600 }}>Testar</button>
+          <button onClick={()=>setShowCfg(v=>!v)} style={{ width:32, height:30, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:13 }}>⚙️</button>
+        </div>
+      </div>
+
+      {/* config do endereço */}
+      {showCfg && (
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px", marginBottom:14 }}>
+          <div style={{ fontSize:10, color:T.textMute, marginBottom:5 }}>Endereço do AI Bridge (Tailscale)</div>
+          <input value={urlServidor} onChange={e=>setUrlServidor(e.target.value)} placeholder="http://100.100.195.84:4000"
+            style={{ width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:8, color:T.text, padding:"10px", fontSize:13, outline:"none", fontFamily:"monospace" }}/>
+          <div style={{ fontSize:9, color:T.textFaint, marginTop:6, lineHeight:1.5 }}>Use o IP do Tailscale do seu PC com a porta 4000. O PC precisa estar ligado com o AI Bridge rodando.</div>
+        </div>
+      )}
+
+      {/* mensagens */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"12px", minHeight:300, marginBottom:12 }}>
+        {mensagens.length===0 && (
+          <div style={{ textAlign:"center", padding:"24px 12px" }}>
+            <div style={{ fontSize:34, marginBottom:8 }}>🤖</div>
+            <div style={{ fontSize:13, color:T.textDim, fontWeight:600, marginBottom:4 }}>Assistente da sua carteira</div>
+            <div style={{ fontSize:11, color:T.textFaint, lineHeight:1.5, marginBottom:14 }}>Pergunte sobre seus proventos, peça análises ou diga uma alteração (ex: "comprei mais 10 de BBAS3").</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6, justifyContent:"center" }}>
+              {sugestoes.map(s=>(
+                <button key={s} onClick={()=>setInput(s)} style={{ fontSize:10, padding:"6px 10px", borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textMute, cursor:"pointer" }}>{s}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {mensagens.map((m,i)=>(
+          <div key={i} style={{ display:"flex", justifyContent: m.role==="user"?"flex-end":"flex-start", marginBottom:10 }}>
+            <div style={{
+              maxWidth:"82%", padding:"9px 12px", borderRadius:12, fontSize:13, lineHeight:1.45,
+              background: m.role==="user"?T.accent : m.erro?`${T.red}14`:m.sistema?`${T.green}14`:T.cardAlt,
+              color: m.role==="user"?"#fff":m.erro?T.red:T.text,
+              border: m.role==="user"?"none":`1px solid ${m.erro?T.red+"44":m.sistema?T.green+"44":T.border}`,
+              whiteSpace:"pre-wrap"
+            }}>
+              {m.content}
+              {/* botão de aplicar ação proposta */}
+              {m.acao && m.acao.tipo==="editar" && (
+                <button onClick={()=>aplicarAcao(m.acao)} style={{ display:"block", marginTop:8, padding:"7px 12px", borderRadius:8, border:"none", background:T.green, color:"#06281b", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                  ✓ Aplicar: {m.acao.ticker} {m.acao.campo}={m.acao.valor}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {carregando && (
+          <div style={{ display:"flex", justifyContent:"flex-start", marginBottom:10 }}>
+            <div style={{ padding:"9px 14px", borderRadius:12, background:T.cardAlt, border:`1px solid ${T.border}`, fontSize:13, color:T.textMute }}>
+              pensando…
+            </div>
+          </div>
+        )}
+        <div ref={fimRef}/>
+      </div>
+
+      {/* entrada */}
+      <div style={{ display:"flex", gap:8 }}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") enviar(); }}
+          placeholder="Pergunte algo sobre sua carteira..."
+          style={{ flex:1, background:T.card, border:`1px solid ${T.borderSoft}`, borderRadius:12, color:T.text, padding:"12px 14px", fontSize:14, outline:"none" }}/>
+        <button onClick={enviar} disabled={carregando||!input.trim()} style={{ padding:"0 18px", borderRadius:12, border:"none", background: (carregando||!input.trim())?T.border:T.accent, color:"#fff", cursor:"pointer", fontSize:16, fontWeight:700 }}>➤</button>
+      </div>
+      <div style={{ fontSize:9, color:T.textFaint, textAlign:"center", marginTop:8, lineHeight:1.5 }}>
+        Respostas geradas pela sua IA local (Gemma). Confira sempre os números — a IA pode errar.
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// IMPORTAR EM MASSA — cola texto e atualiza/cria ativos de uma vez
+// ════════════════════════════════════════════════════════════════════════════
+function ImportarMassa({ ativos, setAtivos, onClose, T }) {
+  const [texto, setTexto] = useState("");
+  const itens = parseImportacao(texto);
+  const validos = itens.filter(i=>!i.erro);
+  const erros = itens.filter(i=>i.erro);
+  const porTicker = {}; ativos.forEach(a=>porTicker[a.ticker]=a);
+  const atualizados = validos.filter(i=>porTicker[i.ticker]);
+  const novos = validos.filter(i=>!porTicker[i.ticker]);
+
+  const aplicar = () => {
+    setAtivos(prev => {
+      const mapa = {}; prev.forEach(a=>mapa[a.ticker]={...a});
+      validos.forEach(i=>{
+        if (mapa[i.ticker]) {
+          // atualiza só os campos informados
+          if (i.qtd!=null) mapa[i.ticker].qtd = i.qtd;
+          if (i.precoMedio!=null) mapa[i.ticker].precoMedio = i.precoMedio;
+          if (i.cotacao!=null) mapa[i.ticker].cotacao = i.cotacao;
+        } else {
+          // cria novo ativo com padrões (proventos e setor você ajusta depois)
+          const ehFII = /11$/.test(i.ticker);
+          mapa[i.ticker] = {
+            ticker:i.ticker, nome:i.ticker, cat: ehFII?"FII":"Ação",
+            freq: ehFII?"Mensal":"Trimestral",
+            qtd:i.qtd||0, prov:0,
+            precoMedio:i.precoMedio||0, cotacao:i.cotacao||i.precoMedio||0,
+            meses: ehFII?[1,2,3,4,5,6,7,8,9,10,11,12]:[3,6,9,12],
+            setor:"Outros",
+          };
+        }
+      });
+      return Object.values(mapa);
+    });
+    onClose();
+  };
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000b", zIndex:1100, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"16px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:460, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <div style={{ fontSize:17, fontWeight:800, color:T.text }}>📋 Importar em massa</div>
+          <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:12, lineHeight:1.5 }}>
+          Cole uma linha por ativo no formato <strong style={{ color:T.text }}>TICKER QTD PREÇO-MÉDIO</strong> (cotação é opcional). Ex: <span style={{ color:T.accentSoft }}>BBAS3 291 20,55</span>
+        </div>
+
+        <textarea value={texto} onChange={e=>setTexto(e.target.value)} rows={7}
+          placeholder={"BBAS3 291 20,55\nMFII11 132 52,69 50,71\nPETR4 145 40,75"}
+          style={{ width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:10, color:T.text, padding:"12px", fontSize:14, fontFamily:"monospace", resize:"vertical", outline:"none", marginBottom:12 }}/>
+
+        {/* prévia */}
+        {texto.trim() && (
+          <div style={{ marginBottom:14 }}>
+            <div style={{ display:"flex", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+              <span style={{ fontSize:10, color:T.green, background:`${T.green}14`, border:`1px solid ${T.green}44`, borderRadius:6, padding:"3px 8px", fontWeight:700 }}>{atualizados.length} atualiza</span>
+              <span style={{ fontSize:10, color:T.cyan, background:`${T.cyan}14`, border:`1px solid ${T.cyan}44`, borderRadius:6, padding:"3px 8px", fontWeight:700 }}>{novos.length} novo{novos.length!==1?"s":""}</span>
+              {erros.length>0 && <span style={{ fontSize:10, color:T.red, background:`${T.red}14`, border:`1px solid ${T.red}44`, borderRadius:6, padding:"3px 8px", fontWeight:700 }}>{erros.length} não lido{erros.length!==1?"s":""}</span>}
+            </div>
+            <div style={{ maxHeight:160, overflowY:"auto", background:T.cardAlt, borderRadius:8, padding:"8px" }}>
+              {validos.map((i,idx)=>{
+                const ex = porTicker[i.ticker];
+                return (
+                  <div key={idx} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 6px", borderBottom:`1px solid ${T.border}` }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ fontSize:10, color: ex?T.green:T.cyan }}>{ex?"↻":"+"}</span>
+                      <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{i.ticker}</span>
+                    </div>
+                    <span style={{ fontSize:10, color:T.textMute }}>
+                      {i.qtd!=null?`${i.qtd} cotas`:""}{i.precoMedio!=null?` · PM ${fmt(i.precoMedio)}`:""}{i.cotacao!=null?` · cot ${fmt(i.cotacao)}`:""}
+                    </span>
+                  </div>
+                );
+              })}
+              {erros.map((e,idx)=>(
+                <div key={"e"+idx} style={{ fontSize:10, color:T.red, padding:"4px 6px" }}>⚠️ não reconhecido: "{e.raw}"</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onClose} style={{ flex:1, padding:"12px", borderRadius:10, border:`1px solid ${T.borderSoft}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:13, fontWeight:600 }}>Cancelar</button>
+          <button onClick={aplicar} disabled={validos.length===0} style={{ flex:1, padding:"12px", borderRadius:10, border:"none", background:validos.length>0?T.green:T.border, color:validos.length>0?"#06281b":T.textFaint, cursor:validos.length>0?"pointer":"default", fontSize:13, fontWeight:700 }}>
+            ✓ Aplicar ({validos.length})
+          </button>
+        </div>
+        <div style={{ marginTop:10, fontSize:9, color:T.textFaint, textAlign:"center", lineHeight:1.6 }}>
+          Ativos existentes têm quantidade e preço atualizados. Novos ativos entram com proventos zerados — preencha depois. Nada é apagado automaticamente.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
   const [filtroCat, setFiltroCat] = useState("TODOS");
   const [busca, setBusca] = useState("");
   const [abertos, setAbertos] = useState({}); // grupos expandidos
+  const [showImport, setShowImport] = useState(false);
+  const [statusCot, setStatusCot] = useState(null); // null | "carregando" | {n,total} | "erro" | "offline"
+
+  // busca cotações reais no AI Bridge (brapi) e atualiza os ativos
+  async function atualizarCotacoes() {
+    setStatusCot("carregando");
+    try {
+      const tickers = ativos.map(a=>a.ticker);
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), 20000);
+      const r = await fetch(`${bridgeUrl}/cotacoes`, {
+        method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal,
+        body: JSON.stringify({ tickers }),
+      });
+      clearTimeout(t);
+      const data = await r.json();
+      if (data.ok && data.cotacoes) {
+        const achadas = Object.keys(data.cotacoes).length;
+        setAtivos(prev => prev.map(a => data.cotacoes[a.ticker]!=null ? { ...a, cotacao: data.cotacoes[a.ticker] } : a));
+        setStatusCot({ n: achadas, total: tickers.length });
+      } else {
+        setStatusCot("erro");
+      }
+    } catch (e) {
+      setStatusCot("offline");
+    }
+  }
 
   const lista = ativos.filter(a => {
     if (filtroCat === "FII" && a.cat !== "FII") return false;
@@ -1035,8 +1351,39 @@ function EditarAtivos({ ativos, setAtivos, T }) {
 
   return (
     <div>
+      {/* ações em massa: cotações reais + importar */}
+      <button onClick={atualizarCotacoes} disabled={statusCot==="carregando"} style={{
+        width:"100%", padding:"12px", borderRadius:12, marginBottom:8, cursor:statusCot==="carregando"?"default":"pointer",
+        border:`1px solid ${T.cyan}55`, background:`${T.cyan}12`, color:T.cyan, fontSize:13, fontWeight:700,
+        display:"flex", alignItems:"center", justifyContent:"center", gap:8
+      }}>
+        {statusCot==="carregando" ? "⏳ Buscando cotações..." : "💹 Atualizar cotações reais (brapi)"}
+      </button>
+      {/* resultado da atualização */}
+      {statusCot && statusCot!=="carregando" && (
+        <div style={{ marginBottom:8, padding:"8px 12px", borderRadius:9, fontSize:11, fontWeight:600,
+          background: typeof statusCot==="object" ? `${T.green}12` : `${T.red}12`,
+          border:`1px solid ${typeof statusCot==="object" ? T.green+"44" : T.red+"44"}`,
+          color: typeof statusCot==="object" ? T.green : T.red }}>
+          {typeof statusCot==="object"
+            ? `✓ ${statusCot.n} de ${statusCot.total} cotações atualizadas com o preço real.`
+            : statusCot==="offline"
+              ? "🔴 Servidor offline. Ligue o PC, o AI Bridge e o Tailscale (endereço na engrenagem ⚙️)."
+              : "⚠️ Não foi possível buscar as cotações agora."}
+        </div>
+      )}
+
+      {/* botão importar em massa */}
+      <button onClick={()=>setShowImport(true)} style={{
+        width:"100%", padding:"12px", borderRadius:12, marginBottom:14, cursor:"pointer",
+        border:`1px solid ${T.green}55`, background:`${T.green}12`, color:T.green, fontSize:13, fontWeight:700,
+        display:"flex", alignItems:"center", justifyContent:"center", gap:8
+      }}>📋 Importar em massa (colar texto)</button>
+
+      {showImport && <ImportarMassa ativos={ativos} setAtivos={setAtivos} onClose={()=>setShowImport(false)} T={T}/>}
+
       {/* Resumo topo */}
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:20 }}>
         {[
           {l:"Investido", v:fmtK(totalInvestido), c:T.textDim},
           {l:"Atual", v:fmtK(totalAtual), c:T.accentSoft},
@@ -1054,7 +1401,7 @@ function EditarAtivos({ ativos, setAtivos, T }) {
         <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="🔍 Buscar ativo..."
           style={{ flex:"1 1 140px",background:T.cardAlt,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13 }}/>
       </div>
-      <div style={{ display:"flex",gap:6,marginBottom:12 }}>
+      <div style={{ display:"flex",gap:6,marginBottom:16 }}>
         {[["TODOS","Todos"],["FII","FIIs"],["Ação","Ações"]].map(([k,l])=>(
           <button key={k} onClick={()=>setFiltroCat(k)} style={{ flex:"1 1 0",padding:"7px 4px",borderRadius:8,border:"none",cursor:"pointer",fontSize:11,fontWeight:700,background:filtroCat===k?T.accent:T.border,color:filtroCat===k?"#fff":T.textMute }}>{l}</button>
         ))}
@@ -1229,10 +1576,10 @@ function ModalAporteExtra({ horizonte, onAdd, onClose, T }) {
 
         <div style={{ fontSize:11, color:T.textMute, marginBottom:5 }}>Valor do aporte (R$)</div>
         <input type="number" min="0" value={valor} onChange={e=>setValor(Math.max(0,+e.target.value))}
-          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.amber}`, borderRadius:10, color:T.text, padding:"11px 14px", fontSize:20, fontWeight:800, textAlign:"center", marginBottom:14 }}/>
+          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.amber}`, borderRadius:10, color:T.text, padding:"11px 14px", fontSize:20, fontWeight:800, textAlign:"center", marginBottom:20 }}/>
 
         <div style={{ fontSize:11, color:T.textMute, marginBottom:5 }}>Tipo de evento</div>
-        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:20 }}>
           {LABELS.map(l=>(
             <button key={l.id} onClick={()=>setLabel(l.id)} style={{
               flex:"1 1 0", padding:"8px 4px", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:600,
@@ -1347,7 +1694,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
 
   return (
     <div>
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:20 }}>
         {[
           {l:"Provento 1º mês", v:fmt(provInicial), c:T.textDim},
           {l:`Provento médio em ${horizonte>=12?`${horizonte/12}a`:horizonte+"m"}`, v:fmt(provMedioFinal), c:T.green},
@@ -1362,10 +1709,10 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
         ))}
       </div>
 
-      <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px",marginBottom:14 }}>
-        <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:12 }}>⚙️ Configuração</div>
+      <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px",marginBottom:20 }}>
+        <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:16 }}>⚙️ Configuração</div>
 
-        <div style={{ marginBottom:12 }}>
+        <div style={{ marginBottom:16 }}>
           <div style={{ fontSize:11,color:T.textMute,marginBottom:6 }}>Horizonte</div>
           <div style={{ display:"flex",gap:6 }}>
             {HORIZ.map(o=>(
@@ -1374,7 +1721,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
           </div>
         </div>
 
-        <div style={{ marginBottom:12 }}>
+        <div style={{ marginBottom:16 }}>
           <div style={{ fontSize:11,color:T.textMute,marginBottom:6 }}>Aporte mensal extra (+) ou retirada para despesas (−)</div>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
             {APORTES.map(v=>{
@@ -1394,7 +1741,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
         </div>
 
         {/* APORTES ESPORÁDICOS — pontos de aceleração únicos (13º, férias, venda) */}
-        <div style={{ marginBottom:12, background:`${T.amber}0d`, border:`1px solid ${T.amber}33`, borderRadius:10, padding:"10px 12px" }}>
+        <div style={{ marginBottom:16, background:`${T.amber}0d`, border:`1px solid ${T.amber}33`, borderRadius:10, padding:"10px 12px" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
             <div>
               <div style={{ fontSize:11, color:T.amber, fontWeight:700 }}>⚡ Aportes esporádicos</div>
@@ -1486,7 +1833,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
         </div>
       </div>
 
-      <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 6px 10px",marginBottom:14 }}>
+      <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 6px 10px",marginBottom:20 }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",paddingLeft:8,marginBottom:10 }}>
           <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1 }}>Evolução mês a mês</div>
           <div style={{ display:"flex",gap:4,flexWrap:"wrap" }}>
@@ -1570,11 +1917,11 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
         </div>
       </div>
 
-      <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px",marginBottom:14 }}>
+      <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px",marginBottom:20 }}>
         <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>
           📋 Fluxo de reinvestimento — toque numa barra do gráfico
         </div>
-        <div style={{ display:"flex",gap:2,marginBottom:12,overflowX:"auto" }}>
+        <div style={{ display:"flex",gap:2,marginBottom:16,overflowX:"auto" }}>
           {dados.slice(0,Math.min(horizonte,24)).map((d,i)=>(
             <button key={i} onClick={()=>setMesSelSim(i)} style={{ flex:"0 0 auto",minWidth:54,padding:"5px 4px",borderRadius:6,border:`1px solid ${i===mesSelSim?T.accent:T.border}`,background:i===mesSelSim?T.accentBg:T.cardAlt,cursor:"pointer" }}>
               <div style={{ fontSize:8,color:i===mesSelSim?T.accentSoft:T.textFaint }}>{d.mes}</div>
@@ -1585,7 +1932,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
 
         {mSel && (
           <div>
-            <div style={{ display:"flex",gap:8,marginBottom:12,flexWrap:"wrap" }}>
+            <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
               <div style={{ background:`${T.cyan}1a`,border:`1px solid ${T.cyan}55`,borderRadius:8,padding:"8px 12px",flex:"1 1 auto" }}>
                 <div style={{ fontSize:9,color:T.cyan }}>Provento recebido</div>
                 <div style={{ fontSize:15,fontWeight:800,color:T.cyan }}>{fmt(mSel.provento)}</div>
@@ -1639,17 +1986,17 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
 
       {/* ═══ MODO ESTRATEGISTA (#5) — onde colocar o próximo real ═══ */}
       {melhor && (
-        <div style={{ background:`linear-gradient(135deg, ${T.green}1c, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"16px 14px", marginBottom:14 }}>
+        <div style={{ background:`linear-gradient(135deg, ${T.green}1c, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"16px 14px", marginBottom:20 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
             <span style={{ fontSize:20 }}>🧠</span>
             <div style={{ fontSize:13, fontWeight:800, color:T.text }}>Pense como estrategista</div>
           </div>
-          <div style={{ fontSize:10, color:T.textMute, marginBottom:12, lineHeight:1.5 }}>
+          <div style={{ fontSize:10, color:T.textMute, marginBottom:16, lineHeight:1.5 }}>
             Para <strong style={{ color:T.green }}>mais dividendo em menos tempo</strong>, o que rende mais por real investido hoje é:
           </div>
 
           {/* destaque do melhor ativo */}
-          <div style={{ background:T.card, border:`1.5px solid ${T.green}`, borderRadius:12, padding:"12px 14px", marginBottom:12 }}>
+          <div style={{ background:T.card, border:`1.5px solid ${T.green}`, borderRadius:12, padding:"12px 14px", marginBottom:16 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
                 <div style={{ fontSize:9, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>🏆 Melhor agora</div>
@@ -1690,7 +2037,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
       )}
 
       {/* ═══ FLUXO DE REINVESTIMENTO (#9) — gráfico próprio, com/sem cartão ═══ */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 6px 12px", marginBottom:14 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px 6px 12px", marginBottom:20 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", paddingLeft:8, paddingRight:8, marginBottom:10 }}>
           <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>♻️ Fluxo de reinvestimento</div>
           <button onClick={()=>setComCartao(v=>!v)} style={{
@@ -1981,7 +2328,7 @@ function ModalMeta({ metaMensal, setMetaMensal, valorAtual, onClose, T }) {
 
         <div style={{ fontSize:11, color:T.textMute, marginBottom:6 }}>Meta de provento médio por mês (R$)</div>
         <input type="number" min="1" value={valor} onChange={e=>setValor(Math.max(0, +e.target.value))}
-          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.accent}`, borderRadius:10, color:T.text, padding:"12px 14px", fontSize:22, fontWeight:800, textAlign:"center", marginBottom:12 }} />
+          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.accent}`, borderRadius:10, color:T.text, padding:"12px 14px", fontSize:22, fontWeight:800, textAlign:"center", marginBottom:16 }} />
 
         {/* sugestões rápidas */}
         <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:18 }}>
@@ -2069,7 +2416,7 @@ function CustoVida({ custoVida, setCustoVida, mediaMes, T }) {
   return (
     <div>
       {/* resumo no topo */}
-      <div style={{ background:`linear-gradient(135deg, ${T.red}1c, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:14 }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.red}1c, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:20 }}>
         <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Custo de vida mensal</div>
         <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(custoTotal)}<span style={{ fontSize:13, color:T.textFaint, fontWeight:600 }}>/mês</span></div>
         <div style={{ marginTop:10, height:8, background:T.cardAlt, borderRadius:5, overflow:"hidden" }}>
@@ -2082,9 +2429,9 @@ function CustoVida({ custoVida, setCustoVida, mediaMes, T }) {
       </div>
 
       {/* MARCOS — quanto de provento/mês para cobrir cada gasto */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:20 }}>
         <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>🎯 Marcos de independência</div>
-        <div style={{ fontSize:10, color:T.textFaint, marginBottom:12, lineHeight:1.5 }}>
+        <div style={{ fontSize:10, color:T.textFaint, marginBottom:16, lineHeight:1.5 }}>
           Quanto de provento médio/mês você precisa para cobrir cada gasto (acumulado, do menor ao maior).
         </div>
         {marcos.length===0 ? (
@@ -2124,7 +2471,7 @@ function CustoVida({ custoVida, setCustoVida, mediaMes, T }) {
       </div>
 
       {/* EDITOR dos gastos */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:20 }}>
         <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🧾 Seus gastos fixos</div>
         {CUSTOS_DEF.map(c=>(
           <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
@@ -2188,7 +2535,7 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
   return (
     <div>
       {/* AVISO EXPLÍCITO — proibido cartão de crédito */}
-      <div style={{ background:"rgba(239,68,68,0.14)", border:`2px solid #ef4444`, borderRadius:14, padding:"14px 16px", marginBottom:14, textAlign:"center" }}>
+      <div style={{ background:"rgba(239,68,68,0.14)", border:`2px solid #ef4444`, borderRadius:14, padding:"14px 16px", marginBottom:20, textAlign:"center" }}>
         <div style={{ fontSize:26, marginBottom:4 }}>🚫💳</div>
         <div style={{ fontSize:14, fontWeight:800, color:"#ef4444" }}>PROIBIDO CARTÃO DE CRÉDITO</div>
         <div style={{ fontSize:10, color:T.textMute, marginTop:4, lineHeight:1.5 }}>
@@ -2197,14 +2544,14 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
       </div>
 
       {/* JORNADA 3 FASES */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px 14px", marginBottom:14 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px 14px", marginBottom:20 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
           <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>🎯 Jornada: liberdade do crédito</div>
           <span style={{ fontSize:11, fontWeight:800, color: fasesOk===3?T.green:T.accentSoft }}>{fasesOk}/3 fases</span>
         </div>
 
         {/* setas das fases (estilo trilha de metas) */}
-        <div style={{ display:"flex", gap:6, marginBottom:14 }}>
+        <div style={{ display:"flex", gap:6, marginBottom:20 }}>
           {FASES.map(f=>(
             <div key={f.n} style={{ flex:1, opacity:f.ok?1:0.4, transition:"opacity 0.3s" }}>
               <div style={{
@@ -2238,7 +2585,7 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
       </div>
 
       {/* CUSTO DE VIDA — resumo (edição completa na aba Custo Vida) */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:20 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>🧾 Custo de vida</div>
           <span style={{ fontSize:14, fontWeight:800, color:T.red }}>{fmt(custoTotal)}/mês</span>
@@ -2258,11 +2605,11 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
       </div>
 
       {/* GARANTIA / LIMITE POR ATIVOS */}
-      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:14 }}>
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", marginBottom:20 }}>
         <div style={{ fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>💎 Limite garantido por ativos</div>
 
         <div style={{ fontSize:11, color:T.textDim, marginBottom:6 }}>Fundos provisionados como garantia (R$)</div>
-        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:12 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:16 }}>
           <input type="number" min="0" step="100" value={fundosProvisionados}
             onChange={e=>setFundosProvisionados(Math.max(0,+e.target.value))}
             style={{ flex:1, background:T.cardAlt, border:`2px solid ${T.green}`, borderRadius:10, color:T.text, padding:"10px 14px", fontSize:18, fontWeight:800, textAlign:"center" }}/>
@@ -2288,9 +2635,161 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
 
 
 // ════════════════════════════════════════════════════════════════════════════
+// CHATBOT — assistente conectado à IA local (via AI Bridge na rede Tailscale)
+// ════════════════════════════════════════════════════════════════════════════
+function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
+  const [mensagens, setMensagens] = useState([]);
+  const [input, setInput] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [statusPC, setStatusPC] = useState("checando"); // checando | online | offline
+  const fimRef = useRef(null);
+
+  // verifica se o PC/servidor está ligado
+  useEffect(() => {
+    let vivo = true;
+    const ping = async () => {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(()=>ctrl.abort(), 4000);
+        const r = await fetch(`${bridgeUrl}/health`, { signal: ctrl.signal });
+        clearTimeout(t);
+        if (vivo) setStatusPC(r.ok ? "online" : "offline");
+      } catch { if (vivo) setStatusPC("offline"); }
+    };
+    ping();
+    const id = setInterval(ping, 15000);
+    return () => { vivo=false; clearInterval(id); };
+  }, [bridgeUrl]);
+
+  useEffect(() => { fimRef.current?.scrollIntoView({ behavior:"smooth" }); }, [mensagens, carregando]);
+
+  // resumo enxuto da carteira para dar contexto ao modelo
+  const resumoCarteira = () => ({
+    totalPatrimonio: +ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0).toFixed(2),
+    proventoAnual: +ativos.reduce((s,a)=>s+a.prov*a.meses.length*a.qtd,0).toFixed(2),
+    ativos: ativos.filter(a=>a.qtd>0).map(a=>({ ticker:a.ticker, cat:a.cat, qtd:a.qtd, precoMedio:a.precoMedio, cotacao:a.cotacao, provMes:a.prov })),
+  });
+
+  const enviar = async () => {
+    const texto = input.trim();
+    if (!texto || carregando) return;
+    setInput("");
+    const novas = [...mensagens, { role:"user", content:texto }];
+    setMensagens(novas);
+    setCarregando(true);
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), 60000);
+      const r = await fetch(`${bridgeUrl}/chat`, {
+        method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal,
+        body: JSON.stringify({
+          mensagem: texto,
+          historico: mensagens.slice(-8), // últimas mensagens p/ contexto
+          carteira: resumoCarteira(),
+        }),
+      });
+      clearTimeout(t);
+      const data = await r.json();
+      const resposta = data?.resposta || data?.erro || "(sem resposta)";
+      setMensagens(m=>[...m, { role:"assistant", content:resposta }]);
+    } catch (e) {
+      setMensagens(m=>[...m, { role:"assistant", content:"⚠️ Não consegui falar com o servidor. Verifique se o PC está ligado, o AI Bridge rodando e o Tailscale conectado.", erro:true }]);
+      setStatusPC("offline");
+    } finally { setCarregando(false); }
+  };
+
+  // detecta se a resposta tem linhas tipo "BBAS3 291 20,55" para aplicar na carteira
+  const detectarEdicoes = (txt) => parseImportacao(txt).filter(i=>!i.erro && i.qtd!=null);
+
+  const sugestoes = [
+    "Resuma minha carteira",
+    "Qual meu maior pagador de dividendos?",
+    "Quanto recebo de proventos por ano?",
+    "Como está minha diversificação?",
+  ];
+
+  return (
+    <div>
+      {/* status do servidor */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"10px 14px", marginBottom:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <span style={{ width:9, height:9, borderRadius:"50%", background: statusPC==="online"?T.green:statusPC==="offline"?T.red:T.amber, boxShadow:`0 0 8px ${statusPC==="online"?T.green:statusPC==="offline"?T.red:T.amber}` }}/>
+          <span style={{ fontSize:12, fontWeight:700, color:T.text }}>
+            {statusPC==="online"?"IA conectada":statusPC==="offline"?"Servidor offline":"Verificando..."}
+          </span>
+        </div>
+        <span style={{ fontSize:9, color:T.textFaint }}>🔒 IA local · privada</span>
+      </div>
+
+      {statusPC==="offline" && (
+        <div style={{ background:`${T.amber}12`, border:`1px solid ${T.amber}44`, borderRadius:10, padding:"11px 13px", marginBottom:14 }}>
+          <div style={{ fontSize:11, color:T.amber, lineHeight:1.6 }}>
+            💡 O assistente usa a IA do seu PC. Para usar: ligue o PC, rode o <strong>AI Bridge</strong> (porta 4000) e conecte o <strong>Tailscale</strong> no celular. Configure o endereço do servidor na engrenagem ⚙️.
+          </div>
+        </div>
+      )}
+
+      {/* histórico de mensagens */}
+      <div style={{ minHeight:240, marginBottom:14 }}>
+        {mensagens.length===0 ? (
+          <div style={{ textAlign:"center", padding:"24px 12px" }}>
+            <div style={{ fontSize:34, marginBottom:8 }}>🤖</div>
+            <div style={{ fontSize:13, color:T.textMute, marginBottom:16 }}>Pergunte qualquer coisa sobre sua carteira.</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              {sugestoes.map(s=>(
+                <button key={s} onClick={()=>setInput(s)} style={{ padding:"9px 12px", borderRadius:9, border:`1px solid ${T.border}`, background:T.card, color:T.textDim, cursor:"pointer", fontSize:12, textAlign:"left" }}>{s}</button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          mensagens.map((m,i)=>{
+            const eu = m.role==="user";
+            const edicoes = !eu && !m.erro ? detectarEdicoes(m.content) : [];
+            return (
+              <div key={i} style={{ display:"flex", justifyContent:eu?"flex-end":"flex-start", marginBottom:10 }}>
+                <div style={{ maxWidth:"85%", background: eu?T.accent:(m.erro?`${T.red}14`:T.card), border:`1px solid ${eu?T.accent:(m.erro?T.red+"44":T.border)}`, borderRadius:14, padding:"10px 13px" }}>
+                  <div style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap" }}>{m.content}</div>
+                  {/* se o assistente sugeriu edições de ativos, oferece aplicar */}
+                  {edicoes.length>0 && (
+                    <button onClick={()=>{
+                      setAtivos(prev=>{
+                        const mapa={}; prev.forEach(a=>mapa[a.ticker]={...a});
+                        edicoes.forEach(i=>{ if(mapa[i.ticker]){ if(i.qtd!=null)mapa[i.ticker].qtd=i.qtd; if(i.precoMedio!=null)mapa[i.ticker].precoMedio=i.precoMedio; if(i.cotacao!=null)mapa[i.ticker].cotacao=i.cotacao; } });
+                        return Object.values(mapa);
+                      });
+                    }} style={{ marginTop:8, padding:"7px 11px", borderRadius:8, border:"none", background:T.green, color:"#06281b", cursor:"pointer", fontSize:11, fontWeight:700 }}>
+                      ✓ Aplicar {edicoes.length} alteração(ões) na carteira
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+        {carregando && (
+          <div style={{ display:"flex", justifyContent:"flex-start", marginBottom:10 }}>
+            <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"10px 14px", fontSize:13, color:T.textMute }}>pensando…</div>
+          </div>
+        )}
+        <div ref={fimRef}/>
+      </div>
+
+      {/* caixa de envio */}
+      <div style={{ display:"flex", gap:8, position:"sticky", bottom:8 }}>
+        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") enviar(); }}
+          placeholder="Pergunte sobre sua carteira..."
+          style={{ flex:1, background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:12, color:T.text, padding:"12px 14px", fontSize:14, outline:"none" }}/>
+        <button onClick={enviar} disabled={carregando||!input.trim()} style={{ width:48, borderRadius:12, border:"none", background: input.trim()&&!carregando?T.accent:T.border, color:"#fff", cursor: input.trim()&&!carregando?"pointer":"default", fontSize:18 }}>↑</button>
+      </div>
+    </div>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
 // PAINEL DE CONFIGURAÇÕES (engrenagem)
 // ════════════════════════════════════════════════════════════════════════════
-function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, onLimparDados, onExportar, onImportar, onClose }) {
+function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onLimparDados, onExportar, onImportar, onClose }) {
   const Secao = ({ titulo, children }) => (
     <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:11,color:T.textMute,textTransform:"uppercase",letterSpacing:1,marginBottom:10,fontWeight:700 }}>{titulo}</div>
@@ -2392,6 +2891,15 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
 
         {/* DADOS — salvamento automático */}
         <Secao titulo="💾 Dados">
+          {/* endereço do servidor de IA */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:10, color:T.textMute, marginBottom:5 }}>🤖 Endereço do servidor de IA (AI Bridge)</div>
+            <input value={bridgeUrl} onChange={e=>setBridgeUrl(e.target.value.trim())}
+              placeholder="http://100.100.195.84:4000"
+              style={{ width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:8, color:T.text, padding:"9px 11px", fontSize:12, outline:"none", fontFamily:"monospace" }}/>
+            <div style={{ fontSize:9, color:T.textFaint, marginTop:4 }}>IP Tailscale do seu PC + porta 4000. Usado pela aba Assistente IA.</div>
+          </div>
+
           <div style={{ background:`${T.green}10`, border:`1px solid ${T.green}33`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
             <div style={{ display:"flex", alignItems:"center", gap:7 }}>
               <span style={{ fontSize:16 }}>✓</span>
@@ -2444,7 +2952,6 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
 
 // ════════════════════════════════════════════════════════════════════════════
 // APP PRINCIPAL
-// ════════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [temaId, setTemaId] = useEstadoSalvo("tema", "padrao");
   const [ativos, setAtivos] = useState(carregarAtivos);
@@ -2466,6 +2973,9 @@ export default function App() {
   // ── CARTÃO / CUSTO DE VIDA — salvos na memória ──────────────────────────
   const [custoVida, setCustoVida] = useEstadoSalvo("custoVida", { agua:100, luz:200, condominio:0, aluguel:1000, internet:120, outros:0 });
   const [fundosProvisionados, setFundosProvisionados] = useEstadoSalvo("fundosProv", 3000);
+
+  // ── CHATBOT / IA LOCAL ──────────────────────────────────────────────────
+  const [bridgeUrl, setBridgeUrl] = useEstadoSalvo("bridgeUrl", "http://100.100.195.84:4000");
 
   // ── HISTÓRICO REAL — retrato mensal da carteira (salvo na memória) ──────
   const [historico, setHistorico] = useEstadoSalvo("historico", []);
@@ -2490,23 +3000,6 @@ export default function App() {
   const ehTV = layout === "tv";
   // fator de escala global: TV aumenta tudo, + multiplicador de fonte do usuario
   const escala = (ehTV ? 1.25 : 1) * fontEsc;
-
-  // ── ESCALA REAL via transform (funciona em qualquer navegador, inclusive preview) ──
-  // 'zoom' falha em alguns ambientes; transform:scale sempre funciona, mas nao reflui
-  // a altura — entao medimos o conteudo e reservamos o espaco vertical correto.
-  const escalaRef = useRef(null);
-  const [alturaEscalada, setAlturaEscalada] = useState(null);
-  useLayoutEffect(() => {
-    if (!escalaRef.current) return;
-    const medir = () => {
-      const h = escalaRef.current?.offsetHeight || 0;
-      setAlturaEscalada(escala === 1 ? null : h * escala);
-    };
-    medir();
-    // re-mede quando a janela muda de tamanho
-    window.addEventListener("resize", medir);
-    return () => window.removeEventListener("resize", medir);
-  });
 
   const listaFiltrada = filtro==="TUDO"?ativos:filtro==="FII"?ativos.filter(a=>a.cat==="FII"):ativos.filter(a=>a.cat==="Ação");
   const chartData = useMemo(()=>buildChart(ativos, filtro),[ativos, filtro]);
@@ -2538,29 +3031,24 @@ export default function App() {
     ]},
     { titulo:"Gerenciar", itens:[
       {id:"editar",     label:"Editar ativos",emoji:"✏️",desc:"Quantidades e cotações"},
+      {id:"chat",       label:"Assistente IA",emoji:"🤖",desc:"Converse sobre a carteira"},
     ]},
   ];
   const TODAS_ABAS = SECOES.flatMap(s=>s.itens);
   const abaAtual = TODAS_ABAS.find(a=>a.id===aba) || TODAS_ABAS[0];
 
   return (
-    <div style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:48,transition:"background 0.3s" }}>
+    <div style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:80,transition:"background 0.3s" }}>
 
       {/* WRAPPER DE ESCALA — transform:scale escala TUDO (px fixos inclusive).
-          A altura do container externo reserva o espaco do conteudo ja escalado,
-          para o scroll funcionar corretamente. */}
-      <div style={{ height: alturaEscalada || "auto", overflow: alturaEscalada ? "hidden" : "visible" }}>
-      <div ref={escalaRef} style={{
-        transform: escala !== 1 ? `scale(${escala})` : "none",
-        transformOrigin: "top center",
-        width: escala !== 1 ? `${100/escala}%` : "100%",
-        marginLeft: escala !== 1 ? `${-(100/escala - 100)/2}%` : 0,
-      }}>
+          Usa 'zoom': escala tudo (px fixos inclusive) e reflui naturalmente,
+          sem cortar conteúdo longo. */}
+      <div style={{ zoom: escala, maxWidth: ehTV ? Math.round(1100/escala) : "none", margin:"0 auto" }}>
       {/* container interno centralizado para TV */}
       <div style={{ maxWidth: ehTV ? 1100 : "none", margin:"0 auto" }}>
 
       {/* HEADER */}
-      <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "12px 12px" : "16px 16px",borderBottom:`1px solid ${T.border}` }}>
+      <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "14px 14px" : "18px 16px 22px",borderBottom:`1px solid ${T.border}` }}>
         {/* linha superior: menu + título + engrenagem */}
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
@@ -2582,20 +3070,22 @@ export default function App() {
           }}>⚙️</button>
         </div>
         {/* MODO FOCO — esconde KPIs e meta nas telas de trabalho */}
-        {!["editar","cartao","custovida"].includes(aba) && (<>
-        <div style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1 }}>{fmt(totalAnual)}<span style={{ fontSize:12,color:T.textFaint,fontWeight:400,marginLeft:8 }}>/ ano · total</span></div>
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:6,marginTop:10 }}>
+        {!["editar","cartao","custovida","chat"].includes(aba) && (<>
+        <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
+        <div style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</div>
+        <div style={{ fontSize:11,color:T.textFaint,marginTop:2 }}>previsto para os próximos 12 meses</div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:8,marginTop:16 }}>
           {[
             {l:"Média/mês",v:fmt(mediaMes),c:T.accentSoft},
             {l:"Maior mês",v:fmt(maxMes),  c:T.green},
             {l:"Menor mês",v:fmt(minMes),  c:T.red},
             {l:"FIIs/ano", v:fmt(totFII),  c:T.cyan},
             {l:"Ações/ano",v:fmt(totAcao), c:T.accent},
-            {l:"Por mês",  v:fmt(totalAnual/12), c:T.textDim},
-          ].map(x=>(
-            <div key={x.l} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 8px" }}>
-              <div style={{ fontSize:8,color:T.textFaint }}>{x.l}</div>
-              <div style={{ fontSize:11,fontWeight:700,color:x.c }}>{x.v}</div>
+            {l:"Média/mês",v:fmt(totalAnual/12), c:T.textDim},
+          ].map((x,i)=>(
+            <div key={i} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px" }}>
+              <div style={{ fontSize:9,color:T.textFaint,marginBottom:2 }}>{x.l}</div>
+              <div style={{ fontSize:12,fontWeight:700,color:x.c }}>{x.v}</div>
             </div>
           ))}
         </div>
@@ -2618,6 +3108,7 @@ export default function App() {
           layout={layout} setLayout={setLayout}
           fontEsc={fontEsc} setFontEsc={setFontEsc}
           densidade={densidade} setDensidade={setDensidade}
+          bridgeUrl={bridgeUrl} setBridgeUrl={setBridgeUrl}
           onLimparDados={()=>{
             if(window.confirm("Apagar TODOS os dados salvos (ativos editados, meta e preferências) e voltar ao original? Isso não pode ser desfeito.")){
               try { Object.keys(localStorage).filter(k=>k.startsWith(PREFIXO)).forEach(k=>localStorage.removeItem(k)); } catch {}
@@ -2694,7 +3185,7 @@ export default function App() {
             {/* seções */}
             <div style={{ flex:1, padding:"8px 10px" }}>
               {SECOES.map(sec=>(
-                <div key={sec.titulo} style={{ marginBottom:14 }}>
+                <div key={sec.titulo} style={{ marginBottom:20 }}>
                   <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1.5, padding:"6px 8px 4px" }}>{sec.titulo}</div>
                   {sec.itens.map(it=>{
                     const ativo = aba===it.id;
@@ -2731,12 +3222,12 @@ export default function App() {
 
       <div key={aba} className="tela-anim" style={{ padding:"14px" }}>
         {/* TÍTULO DA TELA ATUAL (substitui a barra de abas) */}
-        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20 }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ fontSize:22 }}>{abaAtual.emoji}</span>
             <div>
-              <div style={{ fontSize:17,fontWeight:800,color:T.text,lineHeight:1.1 }}>{abaAtual.label}</div>
-              <div style={{ fontSize:10,color:T.textFaint }}>{abaAtual.desc}</div>
+              <div style={{ fontSize:18,fontWeight:800,color:T.text,lineHeight:1.2,marginBottom:3 }}>{abaAtual.label}</div>
+              <div style={{ fontSize:11,color:T.textFaint }}>{abaAtual.desc}</div>
             </div>
           </div>
           <button onClick={()=>setMenuAberto(true)} style={{ display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:9,border:`1px solid ${T.border}`,background:T.card,color:T.textMute,cursor:"pointer",fontSize:11,fontWeight:600 }}>
@@ -2746,7 +3237,7 @@ export default function App() {
 
         {/* FILTROS — seletor segmentado (só em gráfico/ranking) */}
         {(aba==="analises"||aba==="ranking") && (
-          <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:14 }}>
+          <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:20 }}>
             {FILTROS.map(f=>{
               const sel=filtro===f.id;
               return (
@@ -2769,7 +3260,7 @@ export default function App() {
         {/* ABA GRÁFICO */}
         {aba==="analises" && (
           <>
-            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 6px 8px",marginBottom:14 }}>
+            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 6px 8px",marginBottom:20 }}>
               <div style={{ paddingLeft:8,marginBottom:6,fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1 }}>
                 {filtro==="TUDO"?"Proventos por mês — cada cor = um ativo":filtro==="FII"?"FIIs":"Ações"}
               </div>
@@ -2802,7 +3293,7 @@ export default function App() {
                 })}
               </div>
             </div>
-            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px",marginBottom:14 }}>
+            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px",marginBottom:20 }}>
               <div style={{ fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Detalhes do mês · toque em uma barra</div>
               <DetalheMes ativos={ativos} idx={mesSel} filtro={filtro} T={T}/>
             </div>
@@ -2828,7 +3319,10 @@ export default function App() {
         {aba==="cartao" && <CartaoCredito ativos={ativos} mediaMes={mediaMes} custoVida={custoVida} setCustoVida={setCustoVida} fundosProvisionados={fundosProvisionados} setFundosProvisionados={setFundosProvisionados} T={T}/>}
 
         {/* ABA EDITAR */}
-        {aba==="editar" && <EditarAtivos ativos={ativos} setAtivos={setAtivos} T={T}/>}
+        {aba==="editar" && <EditarAtivos ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} T={T}/>}
+
+        {/* ABA CHAT / ASSISTENTE IA */}
+        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} T={T}/>}
 
         {(aba==="analises"||aba==="ranking") && (
           <div style={{ background:T.cardAlt,border:`1px dashed ${T.borderSoft}`,borderRadius:10,padding:"10px 12px",marginTop:14 }}>
@@ -2838,9 +3332,7 @@ export default function App() {
       </div>
 
       </div>{/* fim container TV center */}
-      </div>{/* fim escalaRef scale */}
-      </div>{/* fim container de altura */}
+      </div>{/* fim wrapper de zoom */}
     </div>
   );
 }
-
