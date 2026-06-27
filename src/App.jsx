@@ -218,6 +218,40 @@ function gravarSalvo(chave, valor) {
   try { localStorage.setItem(PREFIXO + chave, JSON.stringify(valor)); } catch { /* preview: ignora */ }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// MOTOR DE LOGS — registro central de tudo que acontece no app
+// Cada log: { id, ts, tipo, direcao, origem, msg, detalhe }
+//   tipo:    "cotacao" | "edicao" | "chat" | "erro" | "sistema" | "import"
+//   direcao: "ida" (app->fora) | "volta" (fora->app) | "interno"
+//   origem:  "app" | "api" (brapi) | "servidor" (bridge/IA)
+// ════════════════════════════════════════════════════════════════════════════
+const LOG_CHAVE = "logs";
+const LOG_MAX = 500; // mantém os últimos 500 registros
+let _logListeners = [];
+
+function registrarLog(tipo, msg, opts = {}) {
+  const entrada = {
+    id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    ts: new Date().toISOString(),
+    tipo,
+    direcao: opts.direcao || "interno",
+    origem: opts.origem || "app",
+    msg: String(msg),
+    detalhe: opts.detalhe != null ? (typeof opts.detalhe === "string" ? opts.detalhe : JSON.stringify(opts.detalhe)) : null,
+  };
+  try {
+    const atuais = lerSalvo(LOG_CHAVE, []);
+    const novos = [entrada, ...atuais].slice(0, LOG_MAX);
+    gravarSalvo(LOG_CHAVE, novos);
+    _logListeners.forEach(fn => { try { fn(novos); } catch {} });
+  } catch {}
+  return entrada;
+}
+function lerLogs() { return lerSalvo(LOG_CHAVE, []); }
+function limparLogs() { gravarSalvo(LOG_CHAVE, []); _logListeners.forEach(fn=>{try{fn([]);}catch{}}); }
+function inscreverLogs(fn) { _logListeners.push(fn); return () => { _logListeners = _logListeners.filter(f=>f!==fn); }; }
+
+
 // Hook: igual ao useState, mas grava automaticamente toda mudança na memória.
 function useEstadoSalvo(chave, padrao) {
   const [valor, setValor] = useState(() => lerSalvo(chave, padrao));
@@ -484,6 +518,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
   const totalInvest = lista.reduce((s,a)=>s+a.qtd*a.precoMedio,0);
   const totalMetrica = metrica==="atual"?totalAtual:totalInvest;
   const resultadoGeral = totalAtual-totalInvest;
+  const mediaMesPainel = lista.reduce((s,a)=>s+a.prov*a.qtd*a.meses.length,0)/12; // proventos médios por mês
 
   const corGrupo = (nome) => agrupar==="cat" ? (corCat[nome]||T.accent) : (COR_SETOR[nome]||T.textMute);
 
@@ -497,12 +532,25 @@ function PainelCarteira({ ativos, historico = [], T }) {
     { id:"Cripto",label:"Cripto" },
   ];
 
-  const [vista, setVista] = useState("resumo"); // "resumo" | "composicao" | "historico"
+  const [vista, setVista] = useState("proventos");
   const MINI = [
+    { id:"proventos",  label:"Proventos",  emoji:"💰", destaque:true },
     { id:"resumo",     label:"Resumo",     emoji:"👁️" },
     { id:"composicao", label:"Composição", emoji:"🥧" },
+    { id:"acoes",      label:"Ações",      emoji:"📈" },
+    { id:"fiis",       label:"FIIs",       emoji:"🏢" },
+    { id:"cripto",     label:"Cripto",     emoji:"🪙" },
+    { id:"outros",     label:"Outros",     emoji:"🧩" },
     { id:"historico",  label:"Histórico",  emoji:"🕒" },
   ];
+
+  // filtro de categoria para as abas por tipo
+  const CAT_VISTA = {
+    acoes:  { teste:a=>a.cat==="Ação",   titulo:"Ações",  cor:T.accent },
+    fiis:   { teste:a=>a.cat==="FII",    titulo:"FIIs",   cor:T.cyan },
+    cripto: { teste:a=>a.cat==="Cripto", titulo:"Cripto", cor:T.amber },
+    outros: { teste:a=>!["Ação","FII","Cripto"].includes(a.cat), titulo:"Outros (ETFs, Tesouro...)", cor:T.green },
+  };
 
   return (
     <div>
@@ -554,20 +602,34 @@ function PainelCarteira({ ativos, historico = [], T }) {
         );
       })()}
 
-      {/* mini-abas internas do Painel */}
-      <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:20 }}>
+      {/* mini-abas internas do Painel — carrossel deslizável, Proventos em destaque */}
+      <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:6, marginBottom:18, scrollbarWidth:"none" }}>
         {MINI.map(m=>{
           const sel = vista===m.id;
+          if (m.destaque) {
+            // botão Proventos: maior, chapado, verde, sempre primeiro
+            return (
+              <button key={m.id} onClick={()=>setVista(m.id)} style={{
+                flexShrink:0, padding:"11px 20px", borderRadius:12, border:"none", cursor:"pointer",
+                fontSize:14, fontWeight:800, whiteSpace:"nowrap",
+                background: sel ? T.green : `${T.green}1f`,
+                color: sel ? "#06281b" : T.green,
+                boxShadow: sel ? `0 4px 14px ${T.green}55` : "none",
+              }}>{m.emoji} {m.label}</button>
+            );
+          }
           return (
-            <button key={m.id} onClick={()=>setVista(m.id)} style={{ flex:1, padding:"8px 4px", borderRadius:7, border:"none", cursor:"pointer", fontSize:11, fontWeight:700, background:sel?T.accentBg:"transparent", color:sel?T.accentSoft:T.textMute }}>
-              {m.emoji} {m.label}
-            </button>
+            <button key={m.id} onClick={()=>setVista(m.id)} style={{
+              flexShrink:0, padding:"11px 16px", borderRadius:12, border:`1px solid ${sel?T.accent:T.border}`, cursor:"pointer",
+              fontSize:12, fontWeight:700, whiteSpace:"nowrap",
+              background: sel?T.accentBg:T.card, color: sel?T.accentSoft:T.textMute
+            }}>{m.emoji} {m.label}</button>
           );
         })}
       </div>
 
-      {/* ═══ VISTA: RESUMO ═══ */}
-      {vista==="resumo" && (<>
+      {/* ═══ VISTA: PROVENTOS (próximos pagamentos + gráfico mês a mês) ═══ */}
+      {vista==="proventos" && (<>
       {/* PRÓXIMOS PROVENTOS — mês atual e próximo (estimado pelas datas) */}
       {(() => {
         const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -631,28 +693,99 @@ function PainelCarteira({ ativos, historico = [], T }) {
           </div>
         );
       })()}
+      </>)}
 
+      {/* ═══ VISTA: RESUMO (patrimônio total + médias) ═══ */}
+      {vista==="resumo" && (<>
       {/* resumo geral */}
-      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:16 }}>
-        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Patrimônio atual</div>
-        <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(totalAtual)}</div>
-        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"18px", marginBottom:16 }}>
+        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>💼 Patrimônio total</div>
+        <div style={{ fontSize:30, fontWeight:800, color:T.text, letterSpacing:-1, lineHeight:1.1 }}>{fmt(totalAtual)}</div>
+        <div style={{ fontSize:11, color:T.green, marginTop:3 }}>Proventos médios: <strong>{fmt(mediaMesPainel)}/mês</strong></div>
+        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Investido</div>
-            <div style={{ fontSize:11, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
           </div>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Resultado</div>
-            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
           </div>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Rentab.</div>
-            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
           </div>
         </div>
       </div>
 
       </>)}
+
+      {/* ═══ VISTAS POR TIPO (Ações, FIIs, Cripto, Outros) ═══ */}
+      {CAT_VISTA[vista] && (() => {
+        const cfg = CAT_VISTA[vista];
+        const itens = ativos.filter(a=>a.qtd>0 && cfg.teste(a)).map(a=>({
+          ticker:a.ticker, cat:a.cat, qtd:a.qtd,
+          valor:+(a.qtd*a.cotacao).toFixed(2),
+          custo:+(a.qtd*a.precoMedio).toFixed(2),
+          provAno:+(a.prov*a.meses.length*a.qtd).toFixed(2),
+        })).sort((x,y)=>y.valor-x.valor);
+        const totalV = itens.reduce((s,i)=>s+i.valor,0);
+        const totalC = itens.reduce((s,i)=>s+i.custo,0);
+        const totalP = itens.reduce((s,i)=>s+i.provAno,0);
+        const resultado = totalV-totalC;
+        return (
+          <div>
+            {/* resumo da categoria */}
+            <div style={{ background:`linear-gradient(135deg, ${cfg.cor}1c, ${T.card})`, border:`1px solid ${cfg.cor}44`, borderRadius:14, padding:"15px", marginBottom:14 }}>
+              <div style={{ fontSize:11, color:cfg.cor, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>{cfg.titulo}</div>
+              <div style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5 }}>{fmt(totalV)}</div>
+              <div style={{ fontSize:11, color:T.textFaint, marginBottom:12 }}>{itens.length} ativo{itens.length!==1?"s":""} · {fmt(totalP)}/ano em proventos</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <div style={{ flex:1, background:T.cardAlt, borderRadius:9, padding:"8px 10px" }}>
+                  <div style={{ fontSize:8, color:T.textFaint }}>Investido</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:T.textDim }}>{fmt(totalC)}</div>
+                </div>
+                <div style={{ flex:1, background:T.cardAlt, borderRadius:9, padding:"8px 10px" }}>
+                  <div style={{ fontSize:8, color:T.textFaint }}>Resultado</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:resultado>=0?T.green:T.red }}>{resultado>=0?"+":""}{fmt(resultado)}</div>
+                </div>
+              </div>
+            </div>
+            {/* lista de ativos da categoria */}
+            {itens.length===0 ? (
+              <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"24px 16px", textAlign:"center" }}>
+                <div style={{ fontSize:28, marginBottom:6 }}>🗂️</div>
+                <div style={{ fontSize:12, color:T.textMute }}>Nenhum ativo deste tipo na carteira.</div>
+              </div>
+            ) : (
+              <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"6px 12px" }}>
+                {itens.map((it,idx)=>{
+                  const pct = totalV>0 ? it.valor/totalV*100 : 0;
+                  return (
+                    <div key={it.ticker} style={{ padding:"11px 0", borderBottom: idx<itens.length-1?`1px solid ${T.border}`:"none" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ width:9, height:9, borderRadius:3, background:corDe(it.ticker,it.cat,T), flexShrink:0 }}/>
+                          <span style={{ fontSize:13, fontWeight:700, color:T.text }}>{it.ticker}</span>
+                          <span style={{ fontSize:9, color:T.textFaint }}>{it.qtd} cotas</span>
+                        </div>
+                        <span style={{ fontSize:13, fontWeight:700, color:T.text }}>{fmt(it.valor)}</span>
+                      </div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <div style={{ flex:1, height:5, background:T.cardAlt, borderRadius:3, overflow:"hidden" }}>
+                          <div style={{ height:"100%", width:`${pct}%`, background:corDe(it.ticker,it.cat,T), borderRadius:3 }}/>
+                        </div>
+                        <span style={{ fontSize:9, color:T.textMute, minWidth:38, textAlign:"right" }}>{pct.toFixed(1)}%</span>
+                        <span style={{ fontSize:9, color:T.green, minWidth:70, textAlign:"right" }}>{fmt(it.provAno)}/ano</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ═══ VISTA: HISTÓRICO ═══ */}
       {vista==="historico" && (
@@ -1209,6 +1342,7 @@ function ImportarMassa({ ativos, setAtivos, onClose, T }) {
   const novos = validos.filter(i=>!porTicker[i.ticker]);
 
   const aplicar = () => {
+    registrarLog("import", `Importação: ${atualizados.length} atualizados, ${novos.length} novos`, { direcao:"interno", origem:"app", detalhe: validos.map(i=>`${i.ticker} qtd=${i.qtd} pm=${i.precoMedio}`).join("; ") });
     setAtivos(prev => {
       const mapa = {}; prev.forEach(a=>mapa[a.ticker]={...a});
       validos.forEach(i=>{
@@ -1300,28 +1434,74 @@ function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
   const [abertos, setAbertos] = useState({}); // grupos expandidos
   const [showImport, setShowImport] = useState(false);
   const [statusCot, setStatusCot] = useState(null); // null | "carregando" | {n,total} | "erro" | "offline"
+  const [logVivo, setLogVivo] = useState([]); // log ao vivo da atualização de cotações
 
-  // busca cotações reais no AI Bridge (brapi) e atualiza os ativos
+  function addLogVivo(txt, tipo="info") {
+    setLogVivo(prev => [...prev, { txt, tipo, hora: new Date().toLocaleTimeString("pt-BR") }]);
+  }
+
+  // busca cotações reais no AI Bridge (brapi) e atualiza os ativos — com log ao vivo
   async function atualizarCotacoes() {
     setStatusCot("carregando");
+    setLogVivo([]);
+    const tickers = ativos.map(a=>a.ticker);
+
+    addLogVivo(`Iniciando atualização de ${tickers.length} ativos`, "passo");
+    addLogVivo(`Ativos: ${tickers.join(", ")}`, "dado");
+    registrarLog("cotacao", `Atualização iniciada para ${tickers.length} ativos`, { direcao:"interno", origem:"app", detalhe:tickers });
+
+    const alvo = `${bridgeUrl}/cotacoes`;
+    addLogVivo(`Montando requisição POST → ${alvo}`, "passo");
+    addLogVivo(`Corpo: { tickers: [${tickers.length} itens] }`, "dado");
+    registrarLog("cotacao", `Requisição enviada ao servidor`, { direcao:"ida", origem:"servidor", detalhe:alvo });
+
     try {
-      const tickers = ativos.map(a=>a.ticker);
       const ctrl = new AbortController();
-      const t = setTimeout(()=>ctrl.abort(), 20000);
-      const r = await fetch(`${bridgeUrl}/cotacoes`, {
+      const t = setTimeout(()=>ctrl.abort(), 30000);
+      const inicio = Date.now();
+      const r = await fetch(alvo, {
         method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal,
         body: JSON.stringify({ tickers }),
       });
       clearTimeout(t);
+      addLogVivo(`Resposta recebida em ${Date.now()-inicio}ms (HTTP ${r.status})`, "passo");
+
       const data = await r.json();
+      registrarLog("cotacao", `Resposta recebida (HTTP ${r.status})`, { direcao:"volta", origem:"servidor", detalhe:data });
+
       if (data.ok && data.cotacoes) {
         const achadas = Object.keys(data.cotacoes).length;
-        setAtivos(prev => prev.map(a => data.cotacoes[a.ticker]!=null ? { ...a, cotacao: data.cotacoes[a.ticker] } : a));
+        addLogVivo(`Servidor retornou ${achadas} cotações (token brapi: ${data.comToken?"SIM":"NÃO"})`, achadas>0?"ok":"erro");
+        if (data.comToken===false) addLogVivo(`⚠️ Sem token brapi no servidor — pode ser a causa de 0 resultados`, "erro");
+
+        // aplica e loga cada alteração
+        let mudancas = 0;
+        setAtivos(prev => prev.map(a => {
+          const nova = data.cotacoes[a.ticker];
+          if (nova!=null && nova!==a.cotacao) {
+            addLogVivo(`${a.ticker}: R$${a.cotacao} → R$${nova}`, "mudou");
+            mudancas++;
+            return { ...a, cotacao: nova };
+          } else if (nova!=null) {
+            addLogVivo(`${a.ticker}: R$${nova} (sem mudança)`, "igual");
+            return a;
+          } else {
+            addLogVivo(`${a.ticker}: não retornado pela brapi`, "falta");
+            return a;
+          }
+        }));
+
+        addLogVivo(`Concluído: ${achadas} cotações, ${mudancas} alteradas`, "passo");
+        registrarLog("cotacao", `Concluído: ${achadas}/${tickers.length} cotações, ${mudancas} alteradas`, { direcao:"interno", origem:"app" });
         setStatusCot({ n: achadas, total: tickers.length });
       } else {
+        addLogVivo(`Resposta sem cotações válidas`, "erro");
+        registrarLog("erro", `Cotações: resposta inválida do servidor`, { direcao:"volta", origem:"servidor", detalhe:data });
         setStatusCot("erro");
       }
     } catch (e) {
+      addLogVivo(`FALHA: ${e.message} (servidor offline?)`, "erro");
+      registrarLog("erro", `Cotações falhou: ${e.message}`, { direcao:"volta", origem:"servidor" });
       setStatusCot("offline");
     }
   }
@@ -1334,11 +1514,21 @@ function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
   });
 
   function atualizar(ticker, campo, valor) {
-    setAtivos(prev => prev.map(a => a.ticker === ticker ? { ...a, [campo]: valor } : a));
+    const nomesCampo = { qtd:"quantidade", precoMedio:"preço médio", cotacao:"cotação", prov:"provento/cota", freq:"frequência", meses:"meses" };
+    setAtivos(prev => prev.map(a => {
+      if (a.ticker !== ticker) return a;
+      const antigo = a[campo];
+      // registra só mudanças de campos numéricos relevantes (evita poluir com cada tecla de meses)
+      if (campo!=="meses" && antigo !== valor) {
+        registrarLog("edicao", `${ticker}: ${nomesCampo[campo]||campo} ${antigo} → ${valor}`, { direcao:"interno", origem:"app", detalhe:{ ticker, campo, de:antigo, para:valor } });
+      }
+      return { ...a, [campo]: valor };
+    }));
   }
 
   function resetar() {
     if (window.confirm("Restaurar todos os valores originais? Suas edições serão perdidas.")) {
+      registrarLog("edicao", "Carteira restaurada aos valores originais", { direcao:"interno", origem:"app" });
       setAtivos(ATIVOS_INICIAIS.map(a => ({ ...a })));
     }
   }
@@ -1370,6 +1560,29 @@ function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
             : statusCot==="offline"
               ? "🔴 Servidor offline. Ligue o PC, o AI Bridge e o Tailscale (endereço na engrenagem ⚙️)."
               : "⚠️ Não foi possível buscar as cotações agora."}
+        </div>
+      )}
+
+      {/* LOG AO VIVO da atualização de cotações */}
+      {logVivo.length>0 && (
+        <div style={{ marginBottom:12, background:"#0a0e1a", border:`1px solid ${T.border}`, borderRadius:10, overflow:"hidden" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", borderBottom:`1px solid ${T.border}`, background:T.cardAlt }}>
+            <span style={{ fontSize:10, color:T.textMute, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>📋 Log da operação</span>
+            <button onClick={()=>setLogVivo([])} style={{ fontSize:9, color:T.textFaint, background:"transparent", border:"none", cursor:"pointer" }}>limpar</button>
+          </div>
+          <div style={{ maxHeight:220, overflowY:"auto", padding:"8px 10px", fontFamily:"monospace" }}>
+            {logVivo.map((l,i)=>{
+              const cor = l.tipo==="erro"?T.red : l.tipo==="ok"||l.tipo==="mudou"?T.green : l.tipo==="passo"?T.accentSoft : l.tipo==="falta"?T.amber : l.tipo==="dado"?T.textFaint : T.textMute;
+              const ic = l.tipo==="erro"?"✕" : l.tipo==="mudou"?"↻" : l.tipo==="ok"||l.tipo==="passo"?"▸" : l.tipo==="falta"?"⚠" : l.tipo==="igual"?"=" : "·";
+              return (
+                <div key={i} style={{ display:"flex", gap:6, fontSize:10, lineHeight:1.6, color:cor }}>
+                  <span style={{ color:T.textFaint, flexShrink:0 }}>{l.hora.slice(0,8)}</span>
+                  <span style={{ flexShrink:0 }}>{ic}</span>
+                  <span style={{ wordBreak:"break-word" }}>{l.txt}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -2677,22 +2890,27 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
     const novas = [...mensagens, { role:"user", content:texto }];
     setMensagens(novas);
     setCarregando(true);
+    const carteira = resumoCarteira();
+    registrarLog("chat", `Pergunta enviada: "${texto.slice(0,60)}"`, { direcao:"ida", origem:"servidor", detalhe:{ contextoEnviado:{ totalPatrimonio:carteira.totalPatrimonio, proventoAnual:carteira.proventoAnual, qtdAtivos:carteira.ativos.length } } });
     try {
       const ctrl = new AbortController();
       const t = setTimeout(()=>ctrl.abort(), 60000);
+      const inicio = Date.now();
       const r = await fetch(`${bridgeUrl}/chat`, {
         method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal,
         body: JSON.stringify({
           mensagem: texto,
           historico: mensagens.slice(-8), // últimas mensagens p/ contexto
-          carteira: resumoCarteira(),
+          carteira,
         }),
       });
       clearTimeout(t);
       const data = await r.json();
       const resposta = data?.resposta || data?.erro || "(sem resposta)";
+      registrarLog("chat", `Resposta recebida em ${Date.now()-inicio}ms`, { direcao:"volta", origem:"servidor", detalhe:resposta.slice(0,200) });
       setMensagens(m=>[...m, { role:"assistant", content:resposta }]);
     } catch (e) {
+      registrarLog("erro", `Chat falhou: ${e.message}`, { direcao:"volta", origem:"servidor" });
       setMensagens(m=>[...m, { role:"assistant", content:"⚠️ Não consegui falar com o servidor. Verifique se o PC está ligado, o AI Bridge rodando e o Tailscale conectado.", erro:true }]);
       setStatusPC("offline");
     } finally { setCarregando(false); }
@@ -2789,7 +3007,122 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // PAINEL DE CONFIGURAÇÕES (engrenagem)
 // ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// VISUALIZADOR DE LOGS — histórico com filtros (tipo, direção, origem, data)
+// ════════════════════════════════════════════════════════════════════════════
+function VisualizadorLogs({ onClose, T }) {
+  const [logs, setLogs] = useState(()=>lerLogs());
+  const [fTipo, setFTipo] = useState("todos");
+  const [fDir, setFDir] = useState("todos");
+  const [fOrigem, setFOrigem] = useState("todos");
+  const [fData, setFData] = useState(""); // YYYY-MM-DD
+  const [expandido, setExpandido] = useState(null);
+
+  useEffect(()=> inscreverLogs(setLogs), []);
+
+  const TIPOS = { cotacao:{l:"Cotação",c:T.cyan,e:"💹"}, edicao:{l:"Edição",c:T.amber,e:"✏️"}, chat:{l:"Chat",c:T.accentSoft,e:"🤖"}, erro:{l:"Erro",c:T.red,e:"⚠️"}, sistema:{l:"Sistema",c:T.textMute,e:"⚙️"}, import:{l:"Import",c:T.green,e:"📋"} };
+  const DIRS = { ida:{l:"Ida →",c:T.accent}, volta:{l:"← Volta",c:T.green}, interno:{l:"Interno",c:T.textMute} };
+  const ORIGENS = { app:"App", api:"API brapi", servidor:"Servidor/IA" };
+
+  const filtrados = logs.filter(l=>{
+    if (fTipo!=="todos" && l.tipo!==fTipo) return false;
+    if (fDir!=="todos" && l.direcao!==fDir) return false;
+    if (fOrigem!=="todos" && l.origem!==fOrigem) return false;
+    if (fData && !l.ts.startsWith(fData)) return false;
+    return true;
+  });
+
+  const fmtHora = (ts) => { try { const d=new Date(ts); return d.toLocaleString("pt-BR",{ day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit" }); } catch { return ts; } };
+
+  const Chip = ({ ativo, onClick, cor, children }) => (
+    <button onClick={onClick} style={{ padding:"5px 10px", borderRadius:7, border:`1px solid ${ativo?(cor||T.accent):T.border}`, background:ativo?`${cor||T.accent}1a`:"transparent", color:ativo?(cor||T.accentSoft):T.textMute, fontSize:10, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>{children}</button>
+  );
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000b", zIndex:1200, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:520, maxHeight:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 20px 60px #000c" }}>
+        {/* cabeçalho */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 18px", borderBottom:`1px solid ${T.border}` }}>
+          <div>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text }}>🗂️ Histórico de logs</div>
+            <div style={{ fontSize:10, color:T.textFaint }}>{filtrados.length} de {logs.length} registros</div>
+          </div>
+          <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
+        </div>
+
+        {/* filtros */}
+        <div style={{ padding:"12px 14px", borderBottom:`1px solid ${T.border}`, display:"flex", flexDirection:"column", gap:8 }}>
+          <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Tipo</div>
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+            <Chip ativo={fTipo==="todos"} onClick={()=>setFTipo("todos")}>Todos</Chip>
+            {Object.entries(TIPOS).map(([k,v])=><Chip key={k} ativo={fTipo===k} cor={v.c} onClick={()=>setFTipo(k)}>{v.e} {v.l}</Chip>)}
+          </div>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <div style={{ flex:1, minWidth:130 }}>
+              <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Fluxo</div>
+              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                <Chip ativo={fDir==="todos"} onClick={()=>setFDir("todos")}>Todos</Chip>
+                {Object.entries(DIRS).map(([k,v])=><Chip key={k} ativo={fDir===k} cor={v.c} onClick={()=>setFDir(k)}>{v.l}</Chip>)}
+              </div>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end" }}>
+            <div style={{ flex:1, minWidth:140 }}>
+              <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Origem</div>
+              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                <Chip ativo={fOrigem==="todos"} onClick={()=>setFOrigem("todos")}>Todas</Chip>
+                {Object.entries(ORIGENS).map(([k,v])=><Chip key={k} ativo={fOrigem===k} onClick={()=>setFOrigem(k)}>{v}</Chip>)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize:9, color:T.textFaint, textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>Data</div>
+              <input type="date" value={fData} onChange={e=>setFData(e.target.value)} style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:7, color:T.text, padding:"6px 8px", fontSize:11 }}/>
+            </div>
+          </div>
+          {(fTipo!=="todos"||fDir!=="todos"||fOrigem!=="todos"||fData) && (
+            <button onClick={()=>{ setFTipo("todos"); setFDir("todos"); setFOrigem("todos"); setFData(""); }} style={{ alignSelf:"flex-start", fontSize:10, color:T.accentSoft, background:"transparent", border:"none", cursor:"pointer", textDecoration:"underline" }}>limpar filtros</button>
+          )}
+        </div>
+
+        {/* lista */}
+        <div style={{ flex:1, overflowY:"auto", padding:"10px 12px" }}>
+          {filtrados.length===0 ? (
+            <div style={{ textAlign:"center", padding:"30px 0", fontSize:12, color:T.textFaint }}>Nenhum registro com esses filtros.</div>
+          ) : filtrados.map(l=>{
+            const tp = TIPOS[l.tipo] || TIPOS.sistema;
+            const dr = DIRS[l.direcao] || DIRS.interno;
+            const aberto = expandido===l.id;
+            return (
+              <div key={l.id} onClick={()=>setExpandido(aberto?null:l.id)} style={{ background:T.card, border:`1px solid ${T.border}`, borderLeft:`3px solid ${tp.c}`, borderRadius:9, padding:"9px 11px", marginBottom:6, cursor:l.detalhe?"pointer":"default" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:9, color:tp.c, background:`${tp.c}1a`, padding:"1px 6px", borderRadius:4, fontWeight:700 }}>{tp.e} {tp.l}</span>
+                    <span style={{ fontSize:8, color:dr.c }}>{dr.l}</span>
+                    <span style={{ fontSize:8, color:T.textFaint }}>{ORIGENS[l.origem]||l.origem}</span>
+                  </div>
+                  <span style={{ fontSize:9, color:T.textFaint, whiteSpace:"nowrap" }}>{fmtHora(l.ts)}</span>
+                </div>
+                <div style={{ fontSize:11, color:T.textDim, marginTop:4 }}>{l.msg}</div>
+                {l.detalhe && aberto && (
+                  <pre style={{ fontSize:9, color:T.textMute, background:T.cardAlt, borderRadius:6, padding:"8px", marginTop:6, overflowX:"auto", whiteSpace:"pre-wrap", wordBreak:"break-word" }}>{l.detalhe}</pre>
+                )}
+                {l.detalhe && !aberto && <div style={{ fontSize:8, color:T.textFaint, marginTop:3 }}>toque para ver detalhes</div>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* rodapé */}
+        <div style={{ padding:"10px 14px", borderTop:`1px solid ${T.border}`, display:"flex", gap:8 }}>
+          <button onClick={()=>{ if(window.confirm("Apagar todo o histórico de logs?")) limparLogs(); }} style={{ flex:1, padding:"10px", borderRadius:9, border:`1px solid ${T.red}44`, background:`${T.red}10`, color:T.red, fontSize:12, fontWeight:600, cursor:"pointer" }}>🗑️ Limpar logs</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onLimparDados, onExportar, onImportar, onClose }) {
+  const [showLogs, setShowLogs] = useState(false);
   const Secao = ({ titulo, children }) => (
     <div style={{ marginBottom:20 }}>
       <div style={{ fontSize:11,color:T.textMute,textTransform:"uppercase",letterSpacing:1,marginBottom:10,fontWeight:700 }}>{titulo}</div>
@@ -2890,6 +3223,19 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
         </Secao>
 
         {/* DADOS — salvamento automático */}
+        <Secao titulo="🗂️ Diagnóstico e logs">
+          <button onClick={()=>setShowLogs(true)} style={{
+            width:"100%", padding:"12px", borderRadius:10, cursor:"pointer", marginBottom:8,
+            border:`1px solid ${T.accent}55`, background:`${T.accent}12`, color:T.accentSoft, fontSize:13, fontWeight:700,
+            display:"flex", alignItems:"center", justifyContent:"center", gap:8
+          }}>🗂️ Ver histórico de logs</button>
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
+            Registra tudo: cotações, edições, chat e erros — com filtros por tipo, fluxo (ida/volta), origem e data. Útil para entender onde algo falha.
+          </div>
+        </Secao>
+
+        {showLogs && <VisualizadorLogs onClose={()=>setShowLogs(false)} T={T}/>}
+
         <Secao titulo="💾 Dados">
           {/* endereço do servidor de IA */}
           <div style={{ marginBottom:12 }}>
@@ -2996,6 +3342,11 @@ export default function App() {
     });
   }, []); // só ao montar
 
+  // log de início de sessão
+  useEffect(() => {
+    registrarLog("sistema", "App aberto", { direcao:"interno", origem:"app", detalhe:{ ativos: ativos.length, bridge: bridgeUrl } });
+  }, []);
+
   const T = TEMAS[temaId];
   const ehTV = layout === "tv";
   // fator de escala global: TV aumenta tudo, + multiplicador de fonte do usuario
@@ -3005,6 +3356,12 @@ export default function App() {
   const chartData = useMemo(()=>buildChart(ativos, filtro),[ativos, filtro]);
   const totalAnual = chartData.reduce((s,d)=>s+d._total,0);
   const mediaMes   = totalAnual/12;
+  // dividendo previsto para o mês atual (pela data real) — usado no card do topo
+  const provEsteMes = (() => {
+    const m = new Date().getMonth()+1;
+    return ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m)).reduce((s,a)=>s+a.prov*a.qtd,0);
+  })();
+  const patrimonioTotal = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
   const maxMes     = Math.max(...chartData.map(d=>d._total), 0);
   const positivos  = chartData.filter(d=>d._total>0);
   const minMes     = positivos.length ? Math.min(...positivos.map(d=>d._total)) : 0;
@@ -3049,25 +3406,34 @@ export default function App() {
 
       {/* HEADER */}
       <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "14px 14px" : "18px 16px 22px",borderBottom:`1px solid ${T.border}` }}>
-        {/* linha superior: menu + título + engrenagem */}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            {/* HAMBÚRGUER — abre a gaveta */}
+        {/* linha superior: [menu engrenagem] título ......... [card dividendo do mês → Painel] */}
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,minWidth:0 }}>
+            {/* HAMBÚRGUER */}
             <button onClick={()=>setMenuAberto(true)} title="Menu" style={{
-              width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
-              background:T.cardAlt,cursor:"pointer",fontSize:17,padding:0,
+              width:36,height:32,borderRadius:9,border:`1px solid ${T.border}`,
+              background:T.cardAlt,cursor:"pointer",fontSize:16,padding:0,flexShrink:0,
               display:"flex",alignItems:"center",justifyContent:"center",color:T.text
             }}>☰</button>
-            <div style={{ fontSize:10,color:T.accent,letterSpacing:2,textTransform:"uppercase" }}>
+            {/* ENGRENAGEM (agora ao lado do menu) */}
+            <button onClick={()=>setShowConfig(true)} title="Configurações" style={{
+              width:36,height:32,borderRadius:9,border:`1px solid ${T.border}`,
+              background:T.cardAlt,cursor:"pointer",fontSize:16,padding:0,flexShrink:0,
+              display:"flex",alignItems:"center",justifyContent:"center"
+            }}>⚙️</button>
+            {/* TÍTULO deslizado para frente */}
+            <div style={{ fontSize:11,color:T.accent,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginLeft:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>
               💰 Carteira {ehTV && <span style={{ color:T.green }}>· TV</span>}
             </div>
           </div>
-          {/* ENGRENAGEM — abre configurações */}
-          <button onClick={()=>setShowConfig(true)} title="Configurações" style={{
-            width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
-            background:T.cardAlt,cursor:"pointer",fontSize:18,padding:0,
-            display:"flex",alignItems:"center",justifyContent:"center"
-          }}>⚙️</button>
+          {/* CARD do patrimônio total — clicável, leva ao Painel */}
+          <button onClick={()=>setAba("painel")} title="Ver no Painel" style={{
+            flexShrink:0, display:"flex", flexDirection:"column", alignItems:"flex-end", gap:0,
+            background:`${T.green}14`, border:`1px solid ${T.green}55`, borderRadius:10, padding:"6px 11px", cursor:"pointer"
+          }}>
+            <span style={{ fontSize:8, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>💼 Patrimônio ›</span>
+            <span style={{ fontSize:16, fontWeight:800, color:T.green, lineHeight:1.1 }}>{fmtK(patrimonioTotal)}</span>
+          </button>
         </div>
         {/* MODO FOCO — esconde KPIs e meta nas telas de trabalho */}
         {!["editar","cartao","custovida","chat"].includes(aba) && (<>
