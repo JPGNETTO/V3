@@ -518,7 +518,6 @@ function PainelCarteira({ ativos, historico = [], T }) {
   const totalInvest = lista.reduce((s,a)=>s+a.qtd*a.precoMedio,0);
   const totalMetrica = metrica==="atual"?totalAtual:totalInvest;
   const resultadoGeral = totalAtual-totalInvest;
-  const mediaMesPainel = lista.reduce((s,a)=>s+a.prov*a.qtd*a.meses.length,0)/12; // proventos médios por mês
 
   const corGrupo = (nome) => agrupar==="cat" ? (corCat[nome]||T.accent) : (COR_SETOR[nome]||T.textMute);
 
@@ -532,25 +531,12 @@ function PainelCarteira({ ativos, historico = [], T }) {
     { id:"Cripto",label:"Cripto" },
   ];
 
-  const [vista, setVista] = useState("proventos");
+  const [vista, setVista] = useState("resumo"); // "resumo" | "composicao" | "historico"
   const MINI = [
-    { id:"proventos",  label:"Proventos",  emoji:"💰", destaque:true },
     { id:"resumo",     label:"Resumo",     emoji:"👁️" },
     { id:"composicao", label:"Composição", emoji:"🥧" },
-    { id:"acoes",      label:"Ações",      emoji:"📈" },
-    { id:"fiis",       label:"FIIs",       emoji:"🏢" },
-    { id:"cripto",     label:"Cripto",     emoji:"🪙" },
-    { id:"outros",     label:"Outros",     emoji:"🧩" },
     { id:"historico",  label:"Histórico",  emoji:"🕒" },
   ];
-
-  // filtro de categoria para as abas por tipo
-  const CAT_VISTA = {
-    acoes:  { teste:a=>a.cat==="Ação",   titulo:"Ações",  cor:T.accent },
-    fiis:   { teste:a=>a.cat==="FII",    titulo:"FIIs",   cor:T.cyan },
-    cripto: { teste:a=>a.cat==="Cripto", titulo:"Cripto", cor:T.amber },
-    outros: { teste:a=>!["Ação","FII","Cripto"].includes(a.cat), titulo:"Outros (ETFs, Tesouro...)", cor:T.green },
-  };
 
   return (
     <div>
@@ -602,34 +588,20 @@ function PainelCarteira({ ativos, historico = [], T }) {
         );
       })()}
 
-      {/* mini-abas internas do Painel — carrossel deslizável, Proventos em destaque */}
-      <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:6, marginBottom:18, scrollbarWidth:"none" }}>
+      {/* mini-abas internas do Painel */}
+      <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:20 }}>
         {MINI.map(m=>{
           const sel = vista===m.id;
-          if (m.destaque) {
-            // botão Proventos: maior, chapado, verde, sempre primeiro
-            return (
-              <button key={m.id} onClick={()=>setVista(m.id)} style={{
-                flexShrink:0, padding:"11px 20px", borderRadius:12, border:"none", cursor:"pointer",
-                fontSize:14, fontWeight:800, whiteSpace:"nowrap",
-                background: sel ? T.green : `${T.green}1f`,
-                color: sel ? "#06281b" : T.green,
-                boxShadow: sel ? `0 4px 14px ${T.green}55` : "none",
-              }}>{m.emoji} {m.label}</button>
-            );
-          }
           return (
-            <button key={m.id} onClick={()=>setVista(m.id)} style={{
-              flexShrink:0, padding:"11px 16px", borderRadius:12, border:`1px solid ${sel?T.accent:T.border}`, cursor:"pointer",
-              fontSize:12, fontWeight:700, whiteSpace:"nowrap",
-              background: sel?T.accentBg:T.card, color: sel?T.accentSoft:T.textMute
-            }}>{m.emoji} {m.label}</button>
+            <button key={m.id} onClick={()=>setVista(m.id)} style={{ flex:1, padding:"8px 4px", borderRadius:7, border:"none", cursor:"pointer", fontSize:11, fontWeight:700, background:sel?T.accentBg:"transparent", color:sel?T.accentSoft:T.textMute }}>
+              {m.emoji} {m.label}
+            </button>
           );
         })}
       </div>
 
-      {/* ═══ VISTA: PROVENTOS (próximos pagamentos + gráfico mês a mês) ═══ */}
-      {vista==="proventos" && (<>
+      {/* ═══ VISTA: RESUMO ═══ */}
+      {vista==="resumo" && (<>
       {/* PRÓXIMOS PROVENTOS — mês atual e próximo (estimado pelas datas) */}
       {(() => {
         const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -693,99 +665,28 @@ function PainelCarteira({ ativos, historico = [], T }) {
           </div>
         );
       })()}
-      </>)}
 
-      {/* ═══ VISTA: RESUMO (patrimônio total + médias) ═══ */}
-      {vista==="resumo" && (<>
       {/* resumo geral */}
-      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"18px", marginBottom:16 }}>
-        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>💼 Patrimônio total</div>
-        <div style={{ fontSize:30, fontWeight:800, color:T.text, letterSpacing:-1, lineHeight:1.1 }}>{fmt(totalAtual)}</div>
-        <div style={{ fontSize:11, color:T.green, marginTop:3 }}>Proventos médios: <strong>{fmt(mediaMesPainel)}/mês</strong></div>
-        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:16 }}>
+        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Patrimônio atual</div>
+        <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(totalAtual)}</div>
+        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Investido</div>
-            <div style={{ fontSize:12, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
+            <div style={{ fontSize:11, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
           </div>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Resultado</div>
-            <div style={{ fontSize:12, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
+            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
           </div>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Rentab.</div>
-            <div style={{ fontSize:12, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
+            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
           </div>
         </div>
       </div>
 
       </>)}
-
-      {/* ═══ VISTAS POR TIPO (Ações, FIIs, Cripto, Outros) ═══ */}
-      {CAT_VISTA[vista] && (() => {
-        const cfg = CAT_VISTA[vista];
-        const itens = ativos.filter(a=>a.qtd>0 && cfg.teste(a)).map(a=>({
-          ticker:a.ticker, cat:a.cat, qtd:a.qtd,
-          valor:+(a.qtd*a.cotacao).toFixed(2),
-          custo:+(a.qtd*a.precoMedio).toFixed(2),
-          provAno:+(a.prov*a.meses.length*a.qtd).toFixed(2),
-        })).sort((x,y)=>y.valor-x.valor);
-        const totalV = itens.reduce((s,i)=>s+i.valor,0);
-        const totalC = itens.reduce((s,i)=>s+i.custo,0);
-        const totalP = itens.reduce((s,i)=>s+i.provAno,0);
-        const resultado = totalV-totalC;
-        return (
-          <div>
-            {/* resumo da categoria */}
-            <div style={{ background:`linear-gradient(135deg, ${cfg.cor}1c, ${T.card})`, border:`1px solid ${cfg.cor}44`, borderRadius:14, padding:"15px", marginBottom:14 }}>
-              <div style={{ fontSize:11, color:cfg.cor, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>{cfg.titulo}</div>
-              <div style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5 }}>{fmt(totalV)}</div>
-              <div style={{ fontSize:11, color:T.textFaint, marginBottom:12 }}>{itens.length} ativo{itens.length!==1?"s":""} · {fmt(totalP)}/ano em proventos</div>
-              <div style={{ display:"flex", gap:8 }}>
-                <div style={{ flex:1, background:T.cardAlt, borderRadius:9, padding:"8px 10px" }}>
-                  <div style={{ fontSize:8, color:T.textFaint }}>Investido</div>
-                  <div style={{ fontSize:13, fontWeight:700, color:T.textDim }}>{fmt(totalC)}</div>
-                </div>
-                <div style={{ flex:1, background:T.cardAlt, borderRadius:9, padding:"8px 10px" }}>
-                  <div style={{ fontSize:8, color:T.textFaint }}>Resultado</div>
-                  <div style={{ fontSize:13, fontWeight:700, color:resultado>=0?T.green:T.red }}>{resultado>=0?"+":""}{fmt(resultado)}</div>
-                </div>
-              </div>
-            </div>
-            {/* lista de ativos da categoria */}
-            {itens.length===0 ? (
-              <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"24px 16px", textAlign:"center" }}>
-                <div style={{ fontSize:28, marginBottom:6 }}>🗂️</div>
-                <div style={{ fontSize:12, color:T.textMute }}>Nenhum ativo deste tipo na carteira.</div>
-              </div>
-            ) : (
-              <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"6px 12px" }}>
-                {itens.map((it,idx)=>{
-                  const pct = totalV>0 ? it.valor/totalV*100 : 0;
-                  return (
-                    <div key={it.ticker} style={{ padding:"11px 0", borderBottom: idx<itens.length-1?`1px solid ${T.border}`:"none" }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          <span style={{ width:9, height:9, borderRadius:3, background:corDe(it.ticker,it.cat,T), flexShrink:0 }}/>
-                          <span style={{ fontSize:13, fontWeight:700, color:T.text }}>{it.ticker}</span>
-                          <span style={{ fontSize:9, color:T.textFaint }}>{it.qtd} cotas</span>
-                        </div>
-                        <span style={{ fontSize:13, fontWeight:700, color:T.text }}>{fmt(it.valor)}</span>
-                      </div>
-                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <div style={{ flex:1, height:5, background:T.cardAlt, borderRadius:3, overflow:"hidden" }}>
-                          <div style={{ height:"100%", width:`${pct}%`, background:corDe(it.ticker,it.cat,T), borderRadius:3 }}/>
-                        </div>
-                        <span style={{ fontSize:9, color:T.textMute, minWidth:38, textAlign:"right" }}>{pct.toFixed(1)}%</span>
-                        <span style={{ fontSize:9, color:T.green, minWidth:70, textAlign:"right" }}>{fmt(it.provAno)}/ano</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* ═══ VISTA: HISTÓRICO ═══ */}
       {vista==="historico" && (
@@ -3356,12 +3257,6 @@ export default function App() {
   const chartData = useMemo(()=>buildChart(ativos, filtro),[ativos, filtro]);
   const totalAnual = chartData.reduce((s,d)=>s+d._total,0);
   const mediaMes   = totalAnual/12;
-  // dividendo previsto para o mês atual (pela data real) — usado no card do topo
-  const provEsteMes = (() => {
-    const m = new Date().getMonth()+1;
-    return ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m)).reduce((s,a)=>s+a.prov*a.qtd,0);
-  })();
-  const patrimonioTotal = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
   const maxMes     = Math.max(...chartData.map(d=>d._total), 0);
   const positivos  = chartData.filter(d=>d._total>0);
   const minMes     = positivos.length ? Math.min(...positivos.map(d=>d._total)) : 0;
@@ -3406,34 +3301,25 @@ export default function App() {
 
       {/* HEADER */}
       <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "14px 14px" : "18px 16px 22px",borderBottom:`1px solid ${T.border}` }}>
-        {/* linha superior: [menu engrenagem] título ......... [card dividendo do mês → Painel] */}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:10 }}>
-          <div style={{ display:"flex",alignItems:"center",gap:8,minWidth:0 }}>
-            {/* HAMBÚRGUER */}
+        {/* linha superior: menu + título + engrenagem */}
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            {/* HAMBÚRGUER — abre a gaveta */}
             <button onClick={()=>setMenuAberto(true)} title="Menu" style={{
-              width:36,height:32,borderRadius:9,border:`1px solid ${T.border}`,
-              background:T.cardAlt,cursor:"pointer",fontSize:16,padding:0,flexShrink:0,
+              width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
+              background:T.cardAlt,cursor:"pointer",fontSize:17,padding:0,
               display:"flex",alignItems:"center",justifyContent:"center",color:T.text
             }}>☰</button>
-            {/* ENGRENAGEM (agora ao lado do menu) */}
-            <button onClick={()=>setShowConfig(true)} title="Configurações" style={{
-              width:36,height:32,borderRadius:9,border:`1px solid ${T.border}`,
-              background:T.cardAlt,cursor:"pointer",fontSize:16,padding:0,flexShrink:0,
-              display:"flex",alignItems:"center",justifyContent:"center"
-            }}>⚙️</button>
-            {/* TÍTULO deslizado para frente */}
-            <div style={{ fontSize:11,color:T.accent,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginLeft:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>
+            <div style={{ fontSize:10,color:T.accent,letterSpacing:2,textTransform:"uppercase" }}>
               💰 Carteira {ehTV && <span style={{ color:T.green }}>· TV</span>}
             </div>
           </div>
-          {/* CARD do patrimônio total — clicável, leva ao Painel */}
-          <button onClick={()=>setAba("painel")} title="Ver no Painel" style={{
-            flexShrink:0, display:"flex", flexDirection:"column", alignItems:"flex-end", gap:0,
-            background:`${T.green}14`, border:`1px solid ${T.green}55`, borderRadius:10, padding:"6px 11px", cursor:"pointer"
-          }}>
-            <span style={{ fontSize:8, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>💼 Patrimônio ›</span>
-            <span style={{ fontSize:16, fontWeight:800, color:T.green, lineHeight:1.1 }}>{fmtK(patrimonioTotal)}</span>
-          </button>
+          {/* ENGRENAGEM — abre configurações */}
+          <button onClick={()=>setShowConfig(true)} title="Configurações" style={{
+            width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
+            background:T.cardAlt,cursor:"pointer",fontSize:18,padding:0,
+            display:"flex",alignItems:"center",justifyContent:"center"
+          }}>⚙️</button>
         </div>
         {/* MODO FOCO — esconde KPIs e meta nas telas de trabalho */}
         {!["editar","cartao","custovida","chat"].includes(aba) && (<>
