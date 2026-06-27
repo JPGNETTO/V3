@@ -518,6 +518,7 @@ function PainelCarteira({ ativos, historico = [], T }) {
   const totalInvest = lista.reduce((s,a)=>s+a.qtd*a.precoMedio,0);
   const totalMetrica = metrica==="atual"?totalAtual:totalInvest;
   const resultadoGeral = totalAtual-totalInvest;
+  const mediaMesPainel = lista.reduce((s,a)=>s+a.prov*a.qtd*a.meses.length,0)/12; // proventos médios por mês
 
   const corGrupo = (nome) => agrupar==="cat" ? (corCat[nome]||T.accent) : (COR_SETOR[nome]||T.textMute);
 
@@ -531,8 +532,9 @@ function PainelCarteira({ ativos, historico = [], T }) {
     { id:"Cripto",label:"Cripto" },
   ];
 
-  const [vista, setVista] = useState("resumo"); // "resumo" | "composicao" | "historico"
+  const [vista, setVista] = useState("proventos"); // proventos | resumo | composicao | historico
   const MINI = [
+    { id:"proventos",  label:"Proventos",  emoji:"💰", destaque:true },
     { id:"resumo",     label:"Resumo",     emoji:"👁️" },
     { id:"composicao", label:"Composição", emoji:"🥧" },
     { id:"historico",  label:"Histórico",  emoji:"🕒" },
@@ -588,20 +590,36 @@ function PainelCarteira({ ativos, historico = [], T }) {
         );
       })()}
 
-      {/* mini-abas internas do Painel */}
-      <div style={{ display:"flex", gap:3, background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:3, marginBottom:20 }}>
+      {/* mini-abas internas do Painel — carrossel deslizável, Proventos em destaque */}
+      <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:6, marginBottom:18, scrollbarWidth:"none" }}>
         {MINI.map(m=>{
           const sel = vista===m.id;
+          if (m.destaque) {
+            // botão Proventos: maior, chapado, verde, sempre primeiro
+            return (
+              <button key={m.id} onClick={()=>setVista(m.id)} style={{
+                flexShrink:0, padding:"11px 20px", borderRadius:12, border:"none", cursor:"pointer",
+                fontSize:14, fontWeight:800, whiteSpace:"nowrap",
+                background: sel ? T.green : `${T.green}1f`,
+                color: sel ? "#06281b" : T.green,
+                boxShadow: sel ? `0 4px 14px ${T.green}55` : "none",
+              }}>{m.emoji} {m.label}</button>
+            );
+          }
           return (
-            <button key={m.id} onClick={()=>setVista(m.id)} style={{ flex:1, padding:"8px 4px", borderRadius:7, border:"none", cursor:"pointer", fontSize:11, fontWeight:700, background:sel?T.accentBg:"transparent", color:sel?T.accentSoft:T.textMute }}>
-              {m.emoji} {m.label}
-            </button>
+            <button key={m.id} onClick={()=>setVista(m.id)} style={{
+              flexShrink:0, padding:"11px 16px", borderRadius:12, border:`1px solid ${sel?T.accent:T.border}`, cursor:"pointer",
+              fontSize:12, fontWeight:700, whiteSpace:"nowrap",
+              background: sel?T.accentBg:T.card, color: sel?T.accentSoft:T.textMute
+            }}>{m.emoji} {m.label}</button>
           );
         })}
       </div>
 
-      {/* ═══ VISTA: RESUMO ═══ */}
-      {vista==="resumo" && (<>
+      {/* ═══ VISTA: PROVENTOS (próximos pagamentos + gráfico mês a mês) ═══ */}
+      {vista==="proventos" && (<>
+      {/* PROJEÇÃO DE PROVENTOS DO PRÓXIMO MÊS */}
+      <ProjecaoProventos ativos={ativos} T={T}/>
       {/* PRÓXIMOS PROVENTOS — mês atual e próximo (estimado pelas datas) */}
       {(() => {
         const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -665,23 +683,27 @@ function PainelCarteira({ ativos, historico = [], T }) {
           </div>
         );
       })()}
+      </>)}
 
+      {/* ═══ VISTA: RESUMO (patrimônio total + médias) ═══ */}
+      {vista==="resumo" && (<>
       {/* resumo geral */}
-      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:16 }}>
-        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>Patrimônio atual</div>
-        <div style={{ fontSize:26, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(totalAtual)}</div>
-        <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+      <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"18px", marginBottom:16 }}>
+        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>💼 Patrimônio total</div>
+        <div style={{ fontSize:30, fontWeight:800, color:T.text, letterSpacing:-1, lineHeight:1.1 }}>{fmt(totalAtual)}</div>
+        <div style={{ fontSize:11, color:T.green, marginTop:3 }}>Proventos médios: <strong>{fmt(mediaMesPainel)}/mês</strong></div>
+        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Investido</div>
-            <div style={{ fontSize:11, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:T.textDim }}>{fmt(totalInvest)}</div>
           </div>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Resultado</div>
-            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{resultadoGeral>=0?"+":""}{fmt(resultadoGeral)}</div>
           </div>
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"5px 10px" }}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 11px" }}>
             <div style={{ fontSize:9, color:T.textFaint }}>Rentab.</div>
-            <div style={{ fontSize:11, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:resultadoGeral>=0?T.green:T.red }}>{totalInvest>0?`${resultadoGeral>=0?"+":""}${((resultadoGeral/totalInvest)*100).toFixed(1)}%`:"—"}</div>
           </div>
         </div>
       </div>
@@ -824,6 +846,309 @@ function PainelCarteira({ ativos, historico = [], T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // ANÁLISE DA CARTEIRA — yield, saúde, benchmarks (usada na aba Análises)
 // ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// PROJEÇÃO DE PROVENTOS — estimativa do próximo mês (card verde), dados ao vivo
+// ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// TELA "MINHA CARTEIRA" — página de distribuição por classe (estilo dedicado)
+// Acessível pelo ícone 💼 no cabeçalho. Usa os dados reais dos ativos.
+// ════════════════════════════════════════════════════════════════════════════
+function classeDe(a) {
+  if (a.cat === "FII") return "Imobiliário";
+  if (a.cat === "Cripto" || /^(COIN11|HASH11|QBTC|BITH11|QETH)/.test(a.ticker)) return "Criptoativos";
+  if (/tesouro/i.test(a.nome) || /^(LFT|LTN|NTN|TD)/.test(a.ticker)) {
+    return /prefix|ltn|ntn-f/i.test(a.nome+a.ticker) ? "Renda Fixa Prefixada" : "Renda Fixa Inflação";
+  }
+  if (/^(IVVB11|NASD11|XINA11|PAGS34|ROXO34|AAPL34|MSFT34|GOGL34|AMZO34)/.test(a.ticker) || /s&p|nasdaq|internacional|\(bdr\)/i.test(a.nome)) return "Internacional";
+  if (/^(GOLD11|OZ1|AURA|GOLD)/.test(a.ticker) || /ouro|gold/i.test(a.nome)) return "Ouro";
+  return "Ações";
+}
+const CLASSE_COR = {
+  "Ações":"#6366f1", "Imobiliário":"#22d3ee", "Criptoativos":"#f59e0b",
+  "Renda Fixa Inflação":"#34d399", "Renda Fixa Prefixada":"#a78bfa",
+  "Internacional":"#60a5fa", "Ouro":"#fbbf24",
+};
+const ORDEM_CLASSE = ["Ações","Imobiliário","Criptoativos","Renda Fixa Inflação","Renda Fixa Prefixada","Internacional","Ouro"];
+
+function TelaCarteira({ ativos, onClose, T }) {
+  const [tab, setTab] = useState("resumo");
+  const [sortA, setSortA] = useState("valor");
+  const [sortF, setSortF] = useState("valor");
+
+  const C = { bg:"#0f0f1a", header:"linear-gradient(135deg,#1e1b4b 0%,#0f172a 100%)", card:"#131325", borda:"#1e293b", txt:"#e2e8f0", txtDim:"#94a3b8", txtFaint:"#64748b", roxo:"#6366f1", verde:"#34d399", vermelho:"#f87171" };
+  const pctFmt = v => v!=null ? `${v>0?"+":""}${v.toFixed(2)}%` : "—";
+
+  // calcula por ativo
+  const comCalc = ativos.filter(a=>a.qtd>0).map(a=>({
+    ...a, classe:classeDe(a),
+    valor:+(a.qtd*a.cotacao).toFixed(2),
+    custo:+(a.qtd*a.precoMedio).toFixed(2),
+    variacao:+((a.qtd*a.cotacao)-(a.qtd*a.precoMedio)).toFixed(2),
+    varPct:a.precoMedio>0 ? ((a.cotacao-a.precoMedio)/a.precoMedio*100) : 0,
+  }));
+  const total = comCalc.reduce((s,a)=>s+a.valor,0);
+
+  // agrupa por classe
+  const porClasse = ORDEM_CLASSE.map(cl=>{
+    const itens = comCalc.filter(a=>a.classe===cl);
+    const v = itens.reduce((s,a)=>s+a.valor,0);
+    const variacao = itens.reduce((s,a)=>s+a.variacao,0);
+    return { classe:cl, valor:v, variacao, percentual: total>0?v/total*100:0, n:itens.length };
+  }).filter(c=>c.valor>0);
+
+  const acoes = comCalc.filter(a=>a.classe==="Ações" || a.classe==="Internacional" || a.classe==="Ouro");
+  const fiis = comCalc.filter(a=>a.classe==="Imobiliário");
+  const totAcoes = acoes.reduce((s,a)=>s+a.valor,0);
+  const totFiis = fiis.reduce((s,a)=>s+a.valor,0);
+  const provMes = ativos.reduce((s,a)=>{
+    const m=new Date().getMonth()+1;
+    return s + (a.meses?.includes(m) ? a.prov*a.qtd : 0);
+  },0);
+
+  const ordenar = (arr,k) => [...arr].sort((x,y)=> k==="valor"?y.valor-x.valor : k==="var"?(x.varPct-y.varPct) : x.ticker.localeCompare(y.ticker));
+
+  const Linha = ({ a }) => (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 44px 70px 70px 58px", gap:6, background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"11px 12px", marginBottom:6, alignItems:"center" }}>
+      <div>
+        <div style={{ fontWeight:700, fontSize:13, color:C.txt }}>{a.ticker}</div>
+        <div style={{ fontSize:10, color:C.txtFaint, marginTop:1 }}>{a.nome}</div>
+        <div style={{ fontSize:11, color:"#a78bfa", marginTop:1, fontWeight:600 }}>{fmt(a.valor)}</div>
+      </div>
+      <div style={{ fontSize:12, color:"#cbd5e1", textAlign:"center" }}>{a.qtd}</div>
+      <div style={{ fontSize:11, color:C.txtDim, textAlign:"right" }}>R${a.precoMedio.toFixed(2)}</div>
+      <div style={{ fontSize:11, color:C.txt, textAlign:"right" }}>R${a.cotacao.toFixed(2)}</div>
+      <div style={{ fontSize:12, fontWeight:700, color:a.varPct>=0?C.verde:C.vermelho, textAlign:"right" }}>{pctFmt(a.varPct)}</div>
+    </div>
+  );
+  const Cab = () => (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 44px 70px 70px 58px", gap:6, padding:"6px 12px", marginBottom:4 }}>
+      {["Ativo","Qtd","P.Médio","Cotação","Var%"].map(h=><div key={h} style={{ fontSize:10, color:"#475569", fontWeight:600, textTransform:"uppercase" }}>{h}</div>)}
+    </div>
+  );
+  const Ordenacao = ({ val, set }) => (
+    <div style={{ display:"flex", gap:6, marginBottom:14, alignItems:"center", flexWrap:"wrap" }}>
+      <span style={{ fontSize:11, color:C.txtFaint, marginRight:4 }}>Ordenar:</span>
+      {[["valor","Valor"],["var","Variação"],["ticker","Ticker"]].map(([k,l])=>(
+        <button key={k} onClick={()=>set(k)} style={{ padding:"5px 12px", borderRadius:6, border:"none", cursor:"pointer", fontSize:11, fontWeight:600, background:val===k?C.roxo:C.borda, color:val===k?"#fff":C.txtDim }}>{l}</button>
+      ))}
+    </div>
+  );
+
+  const MES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][new Date().getMonth()];
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:C.bg, zIndex:1300, overflowY:"auto", color:C.txt, fontFamily:"'Inter',system-ui,sans-serif", paddingBottom:48 }}>
+      {/* Header */}
+      <div style={{ background:C.header, padding:"22px 18px 18px", borderBottom:`1px solid ${C.borda}`, position:"relative" }}>
+        <button onClick={onClose} style={{ position:"absolute", top:16, right:16, width:34, height:34, borderRadius:8, border:`1px solid ${C.borda}`, background:"#1e293b", color:C.txt, cursor:"pointer", fontSize:16 }}>✕</button>
+        <div style={{ fontSize:11, color:C.txtFaint, letterSpacing:2, textTransform:"uppercase", marginBottom:4 }}>Minha Carteira · {MES} {new Date().getFullYear()}</div>
+        <div style={{ fontSize:30, fontWeight:700, color:"#f1f5f9", letterSpacing:-1 }}>{fmt(total)}</div>
+        <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+          {[{l:"Ações",v:fmt(totAcoes),c:C.roxo},{l:"FIIs",v:fmt(totFiis),c:"#22d3ee"},{l:"Proventos/mês",v:fmt(provMes),c:C.verde}].map(x=>(
+            <div key={x.l} style={{ background:"#1e293b", borderRadius:8, padding:"6px 12px" }}>
+              <div style={{ fontSize:10, color:C.txtFaint }}>{x.l}</div>
+              <div style={{ fontSize:13, fontWeight:700, color:x.c }}>{x.v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display:"flex", gap:2, padding:"10px 12px 0", background:C.bg, borderBottom:`1px solid ${C.borda}`, overflowX:"auto" }}>
+        {[{id:"resumo",l:"Resumo"},{id:"acoes",l:"Ações"},{id:"fiis",l:"FIIs"},{id:"outros",l:"Outros"},{id:"proventos",l:"💰 Proventos"}].map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:600, whiteSpace:"nowrap", background:tab===t.id?(t.id==="proventos"?"#059669":C.roxo):"transparent", color:tab===t.id?"#fff":C.txtFaint }}>{t.l}</button>
+        ))}
+      </div>
+
+      <div style={{ padding:"14px" }}>
+        {/* RESUMO */}
+        {tab==="resumo" && (
+          <>
+            <div style={{ background:C.card, border:`1px solid ${C.borda}`, borderRadius:12, padding:"14px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:C.txtFaint, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Distribuição</div>
+              <div style={{ display:"flex", height:10, borderRadius:8, overflow:"hidden", gap:2, marginBottom:12 }}>
+                {porClasse.map(c=><div key={c.classe} style={{ flex:c.percentual, background:CLASSE_COR[c.classe], borderRadius:4 }}/>)}
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:"6px 14px" }}>
+                {porClasse.map(c=>(
+                  <div key={c.classe} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:CLASSE_COR[c.classe] }}/>
+                    <span style={{ fontSize:11, color:C.txtDim }}>{c.classe} <span style={{ color:"#cbd5e1", fontWeight:600 }}>{c.percentual.toFixed(1)}%</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {porClasse.map(c=>{
+              const pos = c.variacao>=0;
+              return (
+                <div key={c.classe} style={{ background:C.card, border:`1px solid ${C.borda}`, borderRadius:12, padding:"13px 14px", marginBottom:8, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={{ width:8, height:36, borderRadius:4, background:CLASSE_COR[c.classe] }}/>
+                    <div>
+                      <div style={{ fontWeight:600, fontSize:14, color:C.txt }}>{c.classe}</div>
+                      <div style={{ fontSize:12, color:C.txtFaint, marginTop:2 }}>{c.percentual.toFixed(1)}% · {c.n} ativo{c.n!==1?"s":""}</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ fontWeight:700, fontSize:15, color:"#f1f5f9" }}>{fmt(c.valor)}</div>
+                    <div style={{ fontSize:12, color:pos?C.verde:C.vermelho, marginTop:2 }}>{pos?"▲":"▼"} {fmt(Math.abs(c.variacao))}</div>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ background:"linear-gradient(135deg,#4338ca,#6366f1)", borderRadius:12, padding:"14px", marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:13, color:"#c7d2fe", fontWeight:600 }}>TOTAL GERAL</div>
+              <div style={{ fontSize:20, fontWeight:800, color:"#fff" }}>{fmt(total)}</div>
+            </div>
+          </>
+        )}
+        {/* AÇÕES */}
+        {tab==="acoes" && (
+          <>
+            <Ordenacao val={sortA} set={setSortA}/>
+            <div style={{ background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"11px 14px", marginBottom:12, display:"flex", justifyContent:"space-between" }}>
+              <span style={{ color:C.txtFaint, fontSize:12 }}>Total · {acoes.length} ativos</span>
+              <span style={{ color:C.roxo, fontWeight:700, fontSize:14 }}>{fmt(totAcoes)}</span>
+            </div>
+            <Cab/>
+            {ordenar(acoes,sortA).map(a=><Linha key={a.ticker} a={a}/>)}
+          </>
+        )}
+        {/* FIIs */}
+        {tab==="fiis" && (
+          <>
+            <Ordenacao val={sortF} set={setSortF}/>
+            <div style={{ background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"11px 14px", marginBottom:12, display:"flex", justifyContent:"space-between" }}>
+              <span style={{ color:C.txtFaint, fontSize:12 }}>Total · {fiis.length} fundos</span>
+              <span style={{ color:"#22d3ee", fontWeight:700, fontSize:14 }}>{fmt(totFiis)}</span>
+            </div>
+            <Cab/>
+            {ordenar(fiis,sortF).map(a=><Linha key={a.ticker} a={a}/>)}
+          </>
+        )}
+        {/* OUTROS */}
+        {tab==="outros" && (
+          <>
+            {["Criptoativos","Renda Fixa Inflação","Renda Fixa Prefixada","Internacional","Ouro"].map(cl=>{
+              const itens = comCalc.filter(a=>a.classe===cl);
+              if (itens.length===0) return null;
+              const tot = itens.reduce((s,a)=>s+a.valor,0);
+              return (
+                <div key={cl} style={{ marginBottom:20 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:CLASSE_COR[cl] }}/>
+                    <span style={{ fontSize:11, color:C.txtDim, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>{cl}</span>
+                    <span style={{ fontSize:13, color:CLASSE_COR[cl], fontWeight:700, marginLeft:"auto" }}>{fmt(tot)}</span>
+                  </div>
+                  {itens.map(a=>(
+                    <div key={a.ticker} style={{ background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"12px 14px", marginBottom:6 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                        <div>
+                          <div style={{ fontWeight:700, fontSize:13, color:C.txt }}>{a.ticker}</div>
+                          <div style={{ fontSize:11, color:C.txtFaint, marginTop:2 }}>{a.nome}</div>
+                          <div style={{ fontSize:11, color:C.txtDim, marginTop:3 }}>Qtd: {a.qtd} · PM: R${a.precoMedio.toFixed(2)} · Cot: R${a.cotacao.toFixed(2)}</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontWeight:700, color:"#f1f5f9", fontSize:14 }}>{fmt(a.valor)}</div>
+                          <div style={{ fontSize:12, color:a.varPct>=0?C.verde:C.vermelho, marginTop:2 }}>{pctFmt(a.varPct)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+            {comCalc.filter(a=>["Criptoativos","Renda Fixa Inflação","Renda Fixa Prefixada","Internacional","Ouro"].includes(a.classe)).length===0 && (
+              <div style={{ textAlign:"center", padding:"30px 0", color:C.txtFaint, fontSize:12 }}>Nenhum ativo de outras classes.</div>
+            )}
+          </>
+        )}
+        {/* PROVENTOS */}
+        {tab==="proventos" && <div style={{ marginTop:4 }}><ProjecaoProventos ativos={ativos} T={T}/></div>}
+      </div>
+    </div>
+  );
+}
+
+function ProjecaoProventos({ ativos, T }) {
+  const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const hoje = new Date();
+  const mProx = hoje.getMonth()+1===12 ? 1 : hoje.getMonth()+2; // mês seguinte (1-12)
+
+  // todos que pagam no próximo mês (estimativa pelos meses cadastrados)
+  const pagantes = ativos
+    .filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(mProx))
+    .map(a=>({ ticker:a.ticker, cat:a.cat, provCota:a.prov, qtd:a.qtd, total:+(a.prov*a.qtd).toFixed(2), valorPos:a.qtd*a.cotacao }))
+    .sort((x,y)=>y.total-x.total);
+
+  const totalPrev = pagantes.reduce((s,f)=>s+f.total,0);
+  const totalFIIs = ativos.filter(a=>a.cat==="FII").reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  const dyMensal = totalFIIs>0 ? (pagantes.filter(p=>p.cat==="FII").reduce((s,p)=>s+p.total,0)/totalFIIs*100) : 0;
+
+  // separa FIIs (mensais, mais previsíveis = "confirmável") de ações (trimestrais = "estimado")
+  const confirmados = pagantes.filter(p=>p.cat==="FII");
+  const estimados = pagantes.filter(p=>p.cat!=="FII");
+  const totConf = confirmados.reduce((s,f)=>s+f.total,0);
+  const totEst = estimados.reduce((s,f)=>s+f.total,0);
+
+  if (pagantes.length===0) {
+    return (
+      <div style={{ background:`linear-gradient(135deg, ${T.green}10, ${T.card})`, border:`1px solid ${T.green}33`, borderRadius:14, padding:"20px 16px", marginBottom:16, textAlign:"center" }}>
+        <div style={{ fontSize:24, marginBottom:6 }}>📅</div>
+        <div style={{ fontSize:12, color:T.textMute }}>Nenhum provento estimado para {MESES[mProx-1]} com os dados atuais.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom:16 }}>
+      {/* card de projeção */}
+      <div style={{ background:"linear-gradient(135deg,#064e3b,#065f46)", border:"1px solid #059669", borderRadius:14, padding:"16px", marginBottom:14 }}>
+        <div style={{ fontSize:11, color:"#6ee7b7", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>📅 Projeção de proventos · {MESES[mProx-1]} {mProx<hoje.getMonth()+1?hoje.getFullYear()+1:hoje.getFullYear()}</div>
+        <div style={{ fontSize:28, fontWeight:800, color:"#ecfdf5" }}>{fmt(totalPrev)}</div>
+        <div style={{ fontSize:12, color:"#6ee7b7", marginTop:6 }}>Estimativa baseada nos meses de pagamento dos seus {pagantes.length} ativos</div>
+        <div style={{ display:"flex", gap:10, marginTop:10, flexWrap:"wrap" }}>
+          <div style={{ background:"#065f46", borderRadius:8, padding:"6px 12px" }}>
+            <div style={{ fontSize:10, color:"#6ee7b7" }}>✅ FIIs (mensais)</div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#34d399" }}>{fmt(totConf)}</div>
+          </div>
+          <div style={{ background:"#065f46", borderRadius:8, padding:"6px 12px" }}>
+            <div style={{ fontSize:10, color:"#6ee7b7" }}>🔮 Outros</div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#fbbf24" }}>{fmt(totEst)}</div>
+          </div>
+          <div style={{ background:"#065f46", borderRadius:8, padding:"6px 12px" }}>
+            <div style={{ fontSize:10, color:"#6ee7b7" }}>DY mensal (FIIs)</div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#a78bfa" }}>{dyMensal.toFixed(2)}%</div>
+          </div>
+        </div>
+      </div>
+
+      {/* contribuição por ativo */}
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px" }}>
+        <div style={{ fontSize:11, color:T.textFaint, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Contribuição por ativo</div>
+        {pagantes.map(f=>{
+          const pctBar = totalPrev>0 ? f.total/totalPrev*100 : 0;
+          const ehFII = f.cat==="FII";
+          return (
+            <div key={f.ticker} style={{ marginBottom:9 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                <span style={{ fontSize:11, color:T.textDim, fontWeight:600 }}>{f.ticker} <span style={{ fontSize:9, color:T.textFaint }}>· {f.qtd}× R${f.provCota.toFixed(2)}</span></span>
+                <span style={{ fontSize:11, color: ehFII?T.green:T.amber, fontWeight:700 }}>{fmt(f.total)}</span>
+              </div>
+              <div style={{ height:6, background:T.cardAlt, borderRadius:4, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${pctBar}%`, background: ehFII?T.green:T.amber, borderRadius:4 }}/>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ fontSize:9, color:T.textFaint, marginTop:8, lineHeight:1.6 }}>
+          ⚠️ Projeção informativa baseada no provento/cota atual e nos meses de pagamento cadastrados. Valores reais são divulgados pelos gestores ao longo do mês.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AnaliseCarteira({ ativos, T }) {
   const todos = ativos;
   const patri = todos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
@@ -3209,6 +3534,7 @@ export default function App() {
 
   // ── CONFIGURAÇÕES (engrenagem) — todas salvas na memória ────────────────
   const [showConfig, setShowConfig] = useState(false);
+  const [showCarteira, setShowCarteira] = useState(false);
   const [layout,   setLayout]   = useEstadoSalvo("layout", "celular");  // "celular" | "tv"
   const [fontEsc,  setFontEsc]  = useEstadoSalvo("fonte", 1);           // 0.85 | 1 | 1.15 | 1.35
   const [densidade,setDensidade]= useEstadoSalvo("densidade", "confortavel"); // "compacto" | "confortavel"
@@ -3257,6 +3583,12 @@ export default function App() {
   const chartData = useMemo(()=>buildChart(ativos, filtro),[ativos, filtro]);
   const totalAnual = chartData.reduce((s,d)=>s+d._total,0);
   const mediaMes   = totalAnual/12;
+  // dividendo previsto para o mês atual (pela data real) — usado no card do topo
+  const provEsteMes = (() => {
+    const m = new Date().getMonth()+1;
+    return ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m)).reduce((s,a)=>s+a.prov*a.qtd,0);
+  })();
+  const patrimonioTotal = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
   const maxMes     = Math.max(...chartData.map(d=>d._total), 0);
   const positivos  = chartData.filter(d=>d._total>0);
   const minMes     = positivos.length ? Math.min(...positivos.map(d=>d._total)) : 0;
@@ -3301,31 +3633,36 @@ export default function App() {
 
       {/* HEADER */}
       <div style={{ background:T.bgHeader,padding: densidade==="compacto" ? "14px 14px" : "18px 16px 22px",borderBottom:`1px solid ${T.border}` }}>
-        {/* linha superior: menu + título + engrenagem */}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            {/* HAMBÚRGUER — abre a gaveta */}
-            <button onClick={()=>setMenuAberto(true)} title="Menu" style={{
-              width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
-              background:T.cardAlt,cursor:"pointer",fontSize:17,padding:0,
-              display:"flex",alignItems:"center",justifyContent:"center",color:T.text
-            }}>☰</button>
-            <div style={{ fontSize:10,color:T.accent,letterSpacing:2,textTransform:"uppercase" }}>
-              💰 Carteira {ehTV && <span style={{ color:T.green }}>· TV</span>}
+        {/* TOPO: [esquerda: ícones + dividendos]  [direita: patrimônio grande esticado] */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"stretch", gap:12, marginBottom:14 }}>
+          {/* COLUNA ESQUERDA: ícones + dividendos do ano */}
+          <div style={{ display:"flex", flexDirection:"column", minWidth:0 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:8,minWidth:0,marginBottom:14 }}>
+              <button onClick={()=>setMenuAberto(true)} title="Menu" style={{ width:36,height:32,borderRadius:9,border:`1px solid ${T.border}`,background:T.cardAlt,cursor:"pointer",fontSize:16,padding:0,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:T.text }}>☰</button>
+              <button onClick={()=>setShowConfig(true)} title="Configurações" style={{ width:36,height:32,borderRadius:9,border:`1px solid ${T.border}`,background:T.cardAlt,cursor:"pointer",fontSize:16,padding:0,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center" }}>⚙️</button>
+              <div style={{ fontSize:11,color:T.accent,letterSpacing:2,textTransform:"uppercase",fontWeight:700,marginLeft:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>💰 Carteira {ehTV && <span style={{ color:T.green }}>· TV</span>}</div>
             </div>
+            {!["editar","cartao","custovida","chat"].includes(aba) && (
+              <div style={{ marginTop:"auto" }}>
+                <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
+                <div style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</div>
+                <div style={{ fontSize:11,color:T.textFaint,marginTop:2 }}>previsto para os próximos 12 meses</div>
+              </div>
+            )}
           </div>
-          {/* ENGRENAGEM — abre configurações */}
-          <button onClick={()=>setShowConfig(true)} title="Configurações" style={{
-            width:38,height:34,borderRadius:9,border:`1px solid ${T.border}`,
-            background:T.cardAlt,cursor:"pointer",fontSize:18,padding:0,
-            display:"flex",alignItems:"center",justifyContent:"center"
-          }}>⚙️</button>
+          {/* COLUNA DIREITA: patrimônio grande, esticado de cima a baixo */}
+          {!["editar","cartao","custovida","chat"].includes(aba) && (
+            <button onClick={()=>setShowCarteira(true)} title="Ver minha carteira" style={{
+              flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-end", justifyContent:"center", gap:8,
+              background:"transparent", border:"none", cursor:"pointer", padding:0
+            }}>
+              <span style={{ fontSize:13, color:T.textMute, fontWeight:600, letterSpacing:0.3 }}>💼 Patrimônio total ›</span>
+              <span style={{ fontSize:50, fontWeight:800, color:T.text, letterSpacing:-2, lineHeight:0.9, whiteSpace:"nowrap" }}>{fmt(patrimonioTotal)}</span>
+            </button>
+          )}
         </div>
         {/* MODO FOCO — esconde KPIs e meta nas telas de trabalho */}
         {!["editar","cartao","custovida","chat"].includes(aba) && (<>
-        <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
-        <div style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</div>
-        <div style={{ fontSize:11,color:T.textFaint,marginTop:2 }}>previsto para os próximos 12 meses</div>
         <div style={{ display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:8,marginTop:16 }}>
           {[
             {l:"Média/mês",v:fmt(mediaMes),c:T.accentSoft},
@@ -3353,6 +3690,8 @@ export default function App() {
       )}
 
       {/* PAINEL DE CONFIGURAÇÕES (modal) */}
+      {showCarteira && <TelaCarteira ativos={ativos} onClose={()=>setShowCarteira(false)} T={T}/>}
+
       {showConfig && (
         <PainelConfig
           T={T}
