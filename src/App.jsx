@@ -937,7 +937,7 @@ function TelaCarteira({ ativos, onClose, T }) {
   const MES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][new Date().getMonth()];
 
   return (
-    <div style={{ position:"fixed", inset:0, background:C.bg, zIndex:1300, overflowY:"auto", color:C.txt, fontFamily:"'Inter',system-ui,sans-serif", paddingBottom:48 }}>
+    <div className="modal-fullscreen" style={{ position:"fixed", inset:0, background:C.bg, zIndex:1300, overflowY:"auto", color:C.txt, fontFamily:"'Inter',system-ui,sans-serif", paddingBottom:48 }}>
       {/* Header */}
       <div style={{ background:C.header, padding:"22px 18px 18px", borderBottom:`1px solid ${C.borda}`, position:"relative" }}>
         <button onClick={onClose} style={{ position:"absolute", top:16, right:16, width:34, height:34, borderRadius:8, border:`1px solid ${C.borda}`, background:"#1e293b", color:C.txt, cursor:"pointer", fontSize:16 }}>✕</button>
@@ -1596,8 +1596,8 @@ function ImportarMassa({ ativos, setAtivos, onClose, T }) {
   };
 
   return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000b", zIndex:1100, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"16px 12px", overflowY:"auto" }}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:460, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+    <div onClick={onClose} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000b", zIndex:1100, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"16px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:460, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
           <div style={{ fontSize:17, fontWeight:800, color:T.text }}>📋 Importar em massa</div>
           <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
@@ -1883,7 +1883,7 @@ function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
 
               {/* cards dos ativos (quando aberto) */}
               {aberto && (
-                <div style={{ paddingLeft:6, marginTop:6 }}>
+                <div className="expand-anim" style={{ paddingLeft:6, marginTop:6 }}>
                   {itens.map(a=>{
                     const c = corDe(a.ticker,a.cat,T);
                     const valorTotal = a.qtd*a.cotacao;
@@ -2006,8 +2006,8 @@ function ModalAporteExtra({ horizonte, onAdd, onClose, T }) {
   const opcoesMes = Array.from({ length: horizonte }, (_, i) => i);
 
   return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000a", zIndex:1100, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"20px 12px", overflowY:"auto" }}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:420, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+    <div onClick={onClose} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000a", zIndex:1100, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"20px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:420, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
           <div style={{ fontSize:17, fontWeight:800, color:T.text }}>⚡ Aporte esporádico</div>
           <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
@@ -2751,12 +2751,12 @@ function ModalMeta({ metaMensal, setMetaMensal, valorAtual, onClose, T }) {
   const sugestoes = [300, 500, 1000, 2000, 5000];
 
   return (
-    <div onClick={onClose} style={{
+    <div onClick={onClose} className="modal-overlay" style={{
       position:"fixed", inset:0, background:"#000a", zIndex:1000,
       display:"flex", alignItems:"flex-start", justifyContent:"center",
       padding:"20px 12px", overflowY:"auto"
     }}>
-      <div onClick={e=>e.stopPropagation()} style={{
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{
         background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16,
         width:"100%", maxWidth:440, padding:"20px", boxShadow:"0 20px 60px #000c"
       }}>
@@ -3265,8 +3265,8 @@ function VisualizadorLogs({ onClose, T }) {
   );
 
   return (
-    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000b", zIndex:1200, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"12px", overflowY:"auto" }}>
-      <div onClick={e=>e.stopPropagation()} style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:520, maxHeight:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 20px 60px #000c" }}>
+    <div onClick={onClose} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000b", zIndex:1200, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:520, maxHeight:"92vh", display:"flex", flexDirection:"column", boxShadow:"0 20px 60px #000c" }}>
         {/* cabeçalho */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 18px", borderBottom:`1px solid ${T.border}` }}>
           <div>
@@ -3367,12 +3367,12 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
   );
 
   return (
-    <div onClick={onClose} style={{
+    <div onClick={onClose} className="modal-overlay" style={{
       position:"fixed", inset:0, background:"#000a", zIndex:1000,
       display:"flex", alignItems:"flex-start", justifyContent:"center",
       padding:"20px 12px", overflowY:"auto"
     }}>
-      <div onClick={e=>e.stopPropagation()} style={{
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{
         background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16,
         width:"100%", maxWidth:440, padding:"20px", boxShadow:"0 20px 60px #000c"
       }}>
@@ -3654,10 +3654,10 @@ export default function App() {
           {!["editar","cartao","custovida","chat"].includes(aba) && (
             <button onClick={()=>setShowCarteira(true)} title="Ver minha carteira" style={{
               flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-end", justifyContent:"center", gap:8,
-              background:"transparent", border:"none", cursor:"pointer", padding:0
+              background:"transparent", border:"none", cursor:"pointer", padding:0, overflow:"hidden"
             }}>
-              <span style={{ fontSize:13, color:T.textMute, fontWeight:600, letterSpacing:0.3 }}>💼 Patrimônio total ›</span>
-              <span style={{ fontSize:50, fontWeight:800, color:T.text, letterSpacing:-2, lineHeight:0.9, whiteSpace:"nowrap" }}>{fmt(patrimonioTotal)}</span>
+              <span style={{ fontSize:13, color:T.textMute, fontWeight:600, letterSpacing:0.3, whiteSpace:"nowrap" }}>💼 Patrimônio total ›</span>
+              <span style={{ fontSize:"clamp(22px, 7.5vw, 50px)", fontWeight:800, color:T.text, letterSpacing:-2, lineHeight:0.9, whiteSpace:"nowrap", maxWidth:"100%" }}>{fmt(patrimonioTotal)}</span>
             </button>
           )}
         </div>
@@ -3759,8 +3759,8 @@ export default function App() {
 
       {/* GAVETA LATERAL — navegação */}
       {menuAberto && (
-        <div onClick={()=>setMenuAberto(false)} style={{ position:"fixed", inset:0, background:"#000a", zIndex:1050, display:"flex" }}>
-          <div onClick={e=>e.stopPropagation()} style={{
+        <div onClick={()=>setMenuAberto(false)} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000a", zIndex:1050, display:"flex" }}>
+          <div onClick={e=>e.stopPropagation()} className="drawer-anim" style={{
             width:"82%", maxWidth:320, height:"100%", background:T.bg, borderRight:`1px solid ${T.borderSoft}`,
             boxShadow:"4px 0 30px #000a", overflowY:"auto", display:"flex", flexDirection:"column"
           }}>
