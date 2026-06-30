@@ -26,3 +26,130 @@ input, select, button {
   width: 0;
   height: 0;
 }
+
+/* Animação sutil de entrada das telas */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.tela-anim {
+  animation: fadeInUp 0.28s ease-out;
+}
+
+/* Botões com leve resposta ao toque */
+button {
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+button:active {
+  transform: scale(0.97);
+}
+
+/* ─── Animações de janelas (modais) ─── */
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes modalInBottom {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.modal-overlay {
+  animation: overlayIn 0.2s ease-out;
+}
+.modal-content {
+  animation: modalIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-fullscreen {
+  animation: modalInBottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Expansão / recolhimento ─── */
+@keyframes expandIn {
+  from { opacity: 0; transform: translateY(-6px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0); max-height: 2000px; }
+}
+.expand-anim {
+  animation: expandIn 0.3s ease-out;
+  overflow: hidden;
+}
+
+/* ─── Cards e itens surgindo ─── */
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.pop-in {
+  animation: popIn 0.22s ease-out;
+}
+
+/* ─── Botões: resposta ao toque mais perceptível ─── */
+button {
+  transition: filter 0.15s ease, transform 0.08s ease, background 0.2s ease, opacity 0.15s ease;
+}
+button:active {
+  transform: scale(0.95);
+  filter: brightness(1.1);
+}
+
+/* Ícone de seta que gira ao expandir */
+.chevron {
+  transition: transform 0.25s ease;
+  display: inline-block;
+}
+.chevron-open {
+  transform: rotate(90deg);
+}
+
+/* Respeita quem prefere menos animação (acessibilidade) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Gaveta lateral deslizando */
+@keyframes drawerIn {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+.drawer-anim {
+  animation: drawerIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ════════════════════════════════════════════════════════════════════ */
+/* TEMA ESPAÇOSO (Minimal+) — mais ar entre os blocos, estilo B3/Nubank   */
+/* Usa !important para sobrepor os espaçamentos inline padrão.            */
+/* ════════════════════════════════════════════════════════════════════ */
+
+/* área de conteúdo das abas: mais respiro nas bordas */
+.app-espacoso .tela-anim {
+  padding: 22px 18px 28px !important;
+}
+/* espaço generoso entre cada bloco/card direto das telas */
+.app-espacoso .tela-anim > div {
+  margin-bottom: 26px !important;
+}
+.app-espacoso .tela-anim > div:last-child {
+  margin-bottom: 0 !important;
+}
+/* respiro extra dentro das mini-abas e listas internas */
+.app-espacoso .tela-anim > div > div {
+  line-height: 1.55;
+}
+/* cabeçalho com mais ar embaixo */
+.app-espacoso > div:first-child {
+  padding-bottom: 26px !important;
+}
+/* textos um pouco mais espaçados (delicadeza) */
+.app-espacoso {
+  letter-spacing: 0.2px;
+}
+/* botões e itens com toque mais alto (estilo app de banco) */
+.app-espacoso button {
+  letter-spacing: 0.2px;
+}
