@@ -586,7 +586,7 @@ function DetalheMes({ ativos, idx, filtro, T }) {
                         <div style={{ display:"flex",alignItems:"center",gap:7 }}>
                           <div style={{ width:8,height:8,borderRadius:2,background:c }}/>
                           <div>
-                            <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
+                            <span onClick={()=>abrirEditorAtivo(a.ticker)} style={{ fontSize:12,fontWeight:700,color:T.text, cursor:"pointer" }}>{a.ticker}</span>
                             <span style={{ fontSize:9,color:T.textFaint,background:T.border,padding:"1px 5px",borderRadius:4,marginLeft:6 }}>{a.freq}</span>
                             <div style={{ fontSize:10,color:T.textFaint,marginTop:1 }}>{a.nome} · {a.qtd}× R${a.prov.toFixed(2)}</div>
                           </div>
@@ -694,10 +694,10 @@ function PainelCarteira({ ativos, historico = [], T }) {
         const destaque = candidatos[hoje.getDate() % candidatos.length];
 
         return (
-          <div style={{ marginBottom:20 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:8 }}>
-              <span style={{ fontSize:15, fontWeight:800, color:T.text }}>{saud}! 👋</span>
-              <span style={{ fontSize:11, color:T.textFaint }}>{dataFmt}</span>
+          <div style={{ marginBottom:20, marginTop:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:14 }}>
+              <span style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5 }}>{saud}! 👋</span>
+              <span style={{ fontSize:12, color:T.textFaint }}>{dataFmt}</span>
             </div>
             <div style={{ background:`linear-gradient(135deg, ${T.amber}1c, ${T.card})`, border:`1px solid ${T.amber}44`, borderRadius:12, padding:"11px 13px", display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ fontSize:20 }}>{destaque.icon}</span>
@@ -739,39 +739,37 @@ function PainelCarteira({ ativos, historico = [], T }) {
       {/* ═══ VISTA: PROVENTOS (próximos pagamentos + gráfico mês a mês) ═══ */}
       {vista==="proventos" && (<>
       {/* PROJEÇÃO DE PROVENTOS DO PRÓXIMO MÊS */}
-      <ProjecaoProventos ativos={ativos} T={T}/>
-      {/* PRÓXIMOS PROVENTOS — mês atual e próximo (estimado pelas datas) */}
+      {/* PROVENTOS A RECEBER — carrossel de 3 meses (este, próximo, seguinte) */}
       {(() => {
         const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
         const hoje = new Date();
-        const mAtual = hoje.getMonth()+1;          // 1-12
-        const mProx  = mAtual===12 ? 1 : mAtual+1;
+        const mAtual = hoje.getMonth()+1; // 1-12
+        const prox = (n) => ((mAtual-1+n)%12)+1; // mês N meses à frente (1-12)
         const provDoMes = (m) => ativos
           .filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m))
-          .map(a=>({ ticker:a.ticker, cat:a.cat, valor:+(a.prov*a.qtd).toFixed(2) }))
+          .map(a=>({ ticker:a.ticker, valor:+(a.prov*a.qtd).toFixed(2) }))
           .sort((x,y)=>y.valor-x.valor);
-        const esteList = provDoMes(mAtual);
-        const proxList = provDoMes(mProx);
-        const esteTot = esteList.reduce((s,p)=>s+p.valor,0);
-        const proxTot = proxList.reduce((s,p)=>s+p.valor,0);
+        const meses = [
+          { rotulo:"📥 Este mês",      m:mAtual,   cor:T.green,      destaque:true },
+          { rotulo:"📅 Próximo mês",   m:prox(1),  cor:T.accentSoft, destaque:false },
+          { rotulo:"🗓️ Mês seguinte",  m:prox(2),  cor:T.cyan,       destaque:false },
+        ].map(x=>{
+          const lista = provDoMes(x.m);
+          return { ...x, total:lista.reduce((s,p)=>s+p.valor,0), n:lista.length };
+        });
         return (
           <div style={{ marginBottom:18 }}>
-            <div style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:10 }}>📆 Proventos a receber</div>
-            <div style={{ display:"flex", gap:10 }}>
-            {/* este mês */}
-            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.green}22, ${T.card})`, border:`1px solid ${T.green}44`, borderRadius:14, padding:"15px 15px 16px" }}>
-              <div style={{ fontSize:9, color:T.green, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>📥 Este mês</div>
-              <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mAtual-1]}</div>
-              <div style={{ fontSize:22, fontWeight:800, color:T.green, letterSpacing:-0.5 }}>{fmt(esteTot)}</div>
-              <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{esteList.length} ativo{esteList.length!==1?"s":""} pagando</div>
-            </div>
-            {/* próximo mês */}
-            <div style={{ flex:1, background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.accent}44`, borderRadius:14, padding:"15px 15px 16px" }}>
-              <div style={{ fontSize:9, color:T.accentSoft, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>📅 Próximo mês</div>
-              <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mProx-1]}</div>
-              <div style={{ fontSize:22, fontWeight:800, color:T.accentSoft, letterSpacing:-0.5 }}>{fmt(proxTot)}</div>
-              <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{proxList.length} ativo{proxList.length!==1?"s":""} pagando</div>
-            </div>
+            <div style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:10 }}>📆 Proventos a receber · próximos 3 meses</div>
+            <div style={{ display:"flex", gap:10, overflowX:"auto", paddingBottom:4, scrollSnapType:"x mandatory" }}>
+              {meses.map((mes,i)=>(
+                <div key={i} style={{ flex:"0 0 auto", width:"46%", minWidth:150, scrollSnapAlign:"start",
+                  background:`linear-gradient(135deg, ${mes.cor}22, ${T.card})`, border:`1px solid ${mes.cor}44`, borderRadius:14, padding:"15px 15px 16px" }}>
+                  <div style={{ fontSize:9, color:mes.cor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>{mes.rotulo}</div>
+                  <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mes.m-1]}</div>
+                  <div style={{ fontSize:22, fontWeight:800, color:mes.cor, letterSpacing:-0.5 }}>{fmt(mes.total)}</div>
+                  <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{mes.n} ativo{mes.n!==1?"s":""} pagando</div>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -799,10 +797,13 @@ function PainelCarteira({ ativos, historico = [], T }) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div style={{ fontSize:9, color:T.textFaint, padding:"4px 10px 0" }}>Visão completa e detalhada na tela 📈 Gráfico.</div>
+            <div style={{ fontSize:9, color:T.textFaint, padding:"4px 10px 0" }}>Visão completa e detalhada na tela 🔬 Análises.</div>
           </div>
         );
       })()}
+
+      {/* PROJEÇÃO + CONTRIBUIÇÃO POR ATIVO */}
+      <ProjecaoProventos ativos={ativos} T={T}/>
       </>)}
 
       {/* ═══ VISTA: RESUMO (patrimônio total + médias) ═══ */}
@@ -990,12 +991,16 @@ const CLASSE_COR = {
 };
 const ORDEM_CLASSE = ["Ações","Imobiliário","Criptoativos","Renda Fixa Inflação","Renda Fixa Prefixada","Internacional","Ouro"];
 
-function TelaCarteira({ ativos, onClose, T }) {
+function TelaCarteira({ ativos, onClose, onEditar, T }) {
   const [tab, setTab] = useState("resumo");
   const [sortA, setSortA] = useState("valor");
   const [sortF, setSortF] = useState("valor");
 
-  const C = { bg:"#0f0f1a", header:"linear-gradient(135deg,#1e1b4b 0%,#0f172a 100%)", card:"#131325", borda:"#1e293b", txt:"#e2e8f0", txtDim:"#94a3b8", txtFaint:"#64748b", roxo:"#6366f1", verde:"#34d399", vermelho:"#f87171" };
+  const C = {
+    bg: T.bg, header: T.bgHeader, card: T.card, borda: T.border,
+    txt: T.text, txtDim: T.textDim, txtFaint: T.textFaint,
+    roxo: T.accent, verde: T.green, vermelho: T.red,
+  };
   const pctFmt = v => v!=null ? `${v>0?"+":""}${v.toFixed(2)}%` : "—";
 
   // calcula por ativo
@@ -1028,13 +1033,13 @@ function TelaCarteira({ ativos, onClose, T }) {
   const ordenar = (arr,k) => [...arr].sort((x,y)=> k==="valor"?y.valor-x.valor : k==="var"?(x.varPct-y.varPct) : x.ticker.localeCompare(y.ticker));
 
   const Linha = ({ a }) => (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 44px 70px 70px 58px", gap:6, background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"11px 12px", marginBottom:6, alignItems:"center" }}>
+    <div onClick={()=>abrirEditorAtivo(a.ticker)} style={{ display:"grid", gridTemplateColumns:"1fr 44px 70px 70px 58px", gap:6, background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"11px 12px", marginBottom:6, alignItems:"center", cursor:"pointer" }}>
       <div>
         <div style={{ fontWeight:700, fontSize:13, color:C.txt }}>{a.ticker}</div>
         <div style={{ fontSize:10, color:C.txtFaint, marginTop:1 }}>{a.nome}</div>
-        <div style={{ fontSize:11, color:"#a78bfa", marginTop:1, fontWeight:600 }}>{fmt(a.valor)}</div>
+        <div style={{ fontSize:11, color:C.roxo, marginTop:1, fontWeight:600 }}>{fmt(a.valor)}</div>
       </div>
-      <div style={{ fontSize:12, color:"#cbd5e1", textAlign:"center" }}>{a.qtd}</div>
+      <div style={{ fontSize:12, color:C.txtDim, textAlign:"center" }}>{a.qtd}</div>
       <div style={{ fontSize:11, color:C.txtDim, textAlign:"right" }}>R${a.precoMedio.toFixed(2)}</div>
       <div style={{ fontSize:11, color:C.txt, textAlign:"right" }}>R${a.cotacao.toFixed(2)}</div>
       <div style={{ fontSize:12, fontWeight:700, color:a.varPct>=0?C.verde:C.vermelho, textAlign:"right" }}>{pctFmt(a.varPct)}</div>
@@ -1042,7 +1047,7 @@ function TelaCarteira({ ativos, onClose, T }) {
   );
   const Cab = () => (
     <div style={{ display:"grid", gridTemplateColumns:"1fr 44px 70px 70px 58px", gap:6, padding:"6px 12px", marginBottom:4 }}>
-      {["Ativo","Qtd","P.Médio","Cotação","Var%"].map(h=><div key={h} style={{ fontSize:10, color:"#475569", fontWeight:600, textTransform:"uppercase" }}>{h}</div>)}
+      {["Ativo","Qtd","P.Médio","Cotação","Var%"].map(h=><div key={h} style={{ fontSize:10, color:C.txtFaint, fontWeight:600, textTransform:"uppercase" }}>{h}</div>)}
     </div>
   );
   const Ordenacao = ({ val, set }) => (
@@ -1060,12 +1065,15 @@ function TelaCarteira({ ativos, onClose, T }) {
     <div className="modal-fullscreen" style={{ position:"fixed", inset:0, background:C.bg, zIndex:1300, overflowY:"auto", color:C.txt, fontFamily:"'Inter',system-ui,sans-serif", paddingBottom:48 }}>
       {/* Header */}
       <div style={{ background:C.header, padding:"22px 18px 18px", borderBottom:`1px solid ${C.borda}`, position:"relative" }}>
-        <button onClick={onClose} style={{ position:"absolute", top:16, right:16, width:34, height:34, borderRadius:8, border:`1px solid ${C.borda}`, background:"#1e293b", color:C.txt, cursor:"pointer", fontSize:16 }}>✕</button>
+        <div style={{ position:"absolute", top:16, right:16, display:"flex", gap:8 }}>
+          <button onClick={()=>{ onClose(); onEditar && onEditar(); }} title="Editar ativos" style={{ width:34, height:34, borderRadius:8, border:`1px solid ${C.borda}`, background:C.card, color:C.txt, cursor:"pointer", fontSize:15 }}>✏️</button>
+          <button onClick={onClose} style={{ width:34, height:34, borderRadius:8, border:`1px solid ${C.borda}`, background:C.card, color:C.txt, cursor:"pointer", fontSize:16 }}>✕</button>
+        </div>
         <div style={{ fontSize:11, color:C.txtFaint, letterSpacing:2, textTransform:"uppercase", marginBottom:4 }}>Minha Carteira · {MES} {new Date().getFullYear()}</div>
-        <div style={{ fontSize:30, fontWeight:700, color:"#f1f5f9", letterSpacing:-1 }}>{fmt(total)}</div>
+        <div style={{ fontSize:30, fontWeight:700, color:C.txt, letterSpacing:-1 }}>{fmt(total)}</div>
         <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
-          {[{l:"Ações",v:fmt(totAcoes),c:C.roxo},{l:"FIIs",v:fmt(totFiis),c:"#22d3ee"},{l:"Proventos/mês",v:fmt(provMes),c:C.verde}].map(x=>(
-            <div key={x.l} style={{ background:"#1e293b", borderRadius:8, padding:"6px 12px" }}>
+          {[{l:"Ações",v:fmt(totAcoes),c:C.roxo},{l:"FIIs",v:fmt(totFiis),c:T.cyan},{l:"Proventos/mês",v:fmt(provMes),c:C.verde}].map(x=>(
+            <div key={x.l} style={{ background:T.cardAlt, borderRadius:8, padding:"6px 12px" }}>
               <div style={{ fontSize:10, color:C.txtFaint }}>{x.l}</div>
               <div style={{ fontSize:13, fontWeight:700, color:x.c }}>{x.v}</div>
             </div>
@@ -1076,7 +1084,7 @@ function TelaCarteira({ ativos, onClose, T }) {
       {/* Tabs */}
       <div style={{ display:"flex", gap:2, padding:"10px 12px 0", background:C.bg, borderBottom:`1px solid ${C.borda}`, overflowX:"auto" }}>
         {[{id:"resumo",l:"Resumo"},{id:"acoes",l:"Ações"},{id:"fiis",l:"FIIs"},{id:"outros",l:"Outros"},{id:"proventos",l:"💰 Proventos"}].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{ padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:600, whiteSpace:"nowrap", background:tab===t.id?(t.id==="proventos"?"#059669":C.roxo):"transparent", color:tab===t.id?"#fff":C.txtFaint }}>{t.l}</button>
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", fontSize:12, fontWeight:600, whiteSpace:"nowrap", background:tab===t.id?(t.id==="proventos"?T.green:C.roxo):"transparent", color:tab===t.id?"#fff":C.txtFaint }}>{t.l}</button>
         ))}
       </div>
 
@@ -1093,7 +1101,7 @@ function TelaCarteira({ ativos, onClose, T }) {
                 {porClasse.map(c=>(
                   <div key={c.classe} style={{ display:"flex", alignItems:"center", gap:5 }}>
                     <div style={{ width:8, height:8, borderRadius:"50%", background:CLASSE_COR[c.classe] }}/>
-                    <span style={{ fontSize:11, color:C.txtDim }}>{c.classe} <span style={{ color:"#cbd5e1", fontWeight:600 }}>{c.percentual.toFixed(1)}%</span></span>
+                    <span style={{ fontSize:11, color:C.txtDim }}>{c.classe} <span style={{ color:C.txt, fontWeight:600 }}>{c.percentual.toFixed(1)}%</span></span>
                   </div>
                 ))}
               </div>
@@ -1110,14 +1118,14 @@ function TelaCarteira({ ativos, onClose, T }) {
                     </div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontWeight:700, fontSize:15, color:"#f1f5f9" }}>{fmt(c.valor)}</div>
+                    <div style={{ fontWeight:700, fontSize:15, color:C.txt }}>{fmt(c.valor)}</div>
                     <div style={{ fontSize:12, color:pos?C.verde:C.vermelho, marginTop:2 }}>{pos?"▲":"▼"} {fmt(Math.abs(c.variacao))}</div>
                   </div>
                 </div>
               );
             })}
-            <div style={{ background:"linear-gradient(135deg,#4338ca,#6366f1)", borderRadius:12, padding:"14px", marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ fontSize:13, color:"#c7d2fe", fontWeight:600 }}>TOTAL GERAL</div>
+            <div style={{ background:`linear-gradient(135deg,${T.accent},${T.accentSoft})`, borderRadius:12, padding:"14px", marginTop:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:13, color:"#fff", fontWeight:600 }}>TOTAL GERAL</div>
               <div style={{ fontSize:20, fontWeight:800, color:"#fff" }}>{fmt(total)}</div>
             </div>
           </>
@@ -1140,7 +1148,7 @@ function TelaCarteira({ ativos, onClose, T }) {
             <Ordenacao val={sortF} set={setSortF}/>
             <div style={{ background:C.card, border:`1px solid ${C.borda}`, borderRadius:10, padding:"11px 14px", marginBottom:12, display:"flex", justifyContent:"space-between" }}>
               <span style={{ color:C.txtFaint, fontSize:12 }}>Total · {fiis.length} fundos</span>
-              <span style={{ color:"#22d3ee", fontWeight:700, fontSize:14 }}>{fmt(totFiis)}</span>
+              <span style={{ color:T.cyan, fontWeight:700, fontSize:14 }}>{fmt(totFiis)}</span>
             </div>
             <Cab/>
             {ordenar(fiis,sortF).map(a=><Linha key={a.ticker} a={a}/>)}
@@ -1169,7 +1177,7 @@ function TelaCarteira({ ativos, onClose, T }) {
                           <div style={{ fontSize:11, color:C.txtDim, marginTop:3 }}>Qtd: {a.qtd} · PM: R${a.precoMedio.toFixed(2)} · Cot: R${a.cotacao.toFixed(2)}</div>
                         </div>
                         <div style={{ textAlign:"right" }}>
-                          <div style={{ fontWeight:700, color:"#f1f5f9", fontSize:14 }}>{fmt(a.valor)}</div>
+                          <div style={{ fontWeight:700, color:C.txt, fontSize:14 }}>{fmt(a.valor)}</div>
                           <div style={{ fontSize:12, color:a.varPct>=0?C.verde:C.vermelho, marginTop:2 }}>{pctFmt(a.varPct)}</div>
                         </div>
                       </div>
@@ -1252,7 +1260,7 @@ function ProjecaoProventos({ ativos, T }) {
           return (
             <div key={f.ticker} style={{ marginBottom:9 }}>
               <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                <span style={{ fontSize:11, color:T.textDim, fontWeight:600 }}>{f.ticker} <span style={{ fontSize:9, color:T.textFaint }}>· {f.qtd}× R${f.provCota.toFixed(2)}</span></span>
+                <span onClick={()=>abrirEditorAtivo(f.ticker)} style={{ fontSize:11, color:T.textDim, fontWeight:600, cursor:"pointer" }}>{f.ticker} <span style={{ fontSize:9, color:T.textFaint }}>· {f.qtd}× R${f.provCota.toFixed(2)}</span></span>
                 <span style={{ fontSize:11, color: ehFII?T.green:T.amber, fontWeight:700 }}>{fmt(f.total)}</span>
               </div>
               <div style={{ height:6, background:T.cardAlt, borderRadius:4, overflow:"hidden" }}>
@@ -1458,7 +1466,7 @@ function Ranking({ ativos, T }) {
                   <div style={{ display:"flex",alignItems:"center",gap:7 }}>
                     <span style={{ fontSize:10,color:T.textFaint,fontWeight:700,minWidth:18 }}>#{i+1}</span>
                     <div style={{ width:9,height:9,borderRadius:2,background:c }}/>
-                    <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
+                    <span onClick={()=>abrirEditorAtivo(a.ticker)} style={{ fontSize:12,fontWeight:700,color:T.text, cursor:"pointer" }}>{a.ticker}</span>
                     <span style={{ fontSize:9,color:T.textFaint,background:T.border,padding:"1px 5px",borderRadius:4 }}>{a.freq}</span>
                   </div>
                   <span style={{ fontSize:12,fontWeight:800,color:c }}>{fmt(a.ano)}</span>
@@ -1486,7 +1494,7 @@ function Ranking({ ativos, T }) {
                   <div style={{ display:"flex",alignItems:"center",gap:7 }}>
                     <span style={{ fontSize:10,color:T.textFaint,fontWeight:700,minWidth:18 }}>#{i+1}</span>
                     <div style={{ width:9,height:9,borderRadius:2,background:corDe(a.ticker,a.cat,T) }}/>
-                    <span style={{ fontSize:12,fontWeight:700,color:T.text }}>{a.ticker}</span>
+                    <span onClick={()=>abrirEditorAtivo(a.ticker)} style={{ fontSize:12,fontWeight:700,color:T.text, cursor:"pointer" }}>{a.ticker}</span>
                     <span style={{ fontSize:9,color:T.textFaint }}>R${a.precoMedio.toFixed(2)}→R${a.cotacao.toFixed(2)}</span>
                   </div>
                   <div style={{ textAlign:"right" }}>
@@ -1841,6 +1849,139 @@ function ImportarMassa({ ativos, setAtivos, onClose, T }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// EDITOR GLOBAL DE ATIVO — popup que pode ser aberto de qualquer lugar do app
+// ════════════════════════════════════════════════════════════════════════════
+let _editorListener = null;
+// chame de qualquer lugar: abrirEditorAtivo("BBAS3") edita, abrirEditorAtivo(null) cria novo
+function abrirEditorAtivo(ticker) { if (_editorListener) _editorListener(ticker === undefined ? null : ticker); }
+function registrarEditorAtivo(fn) { _editorListener = fn; return () => { if (_editorListener === fn) _editorListener = null; }; }
+
+const CATS_EDIT = ["FII","Ação","ETF","Cripto","Tesouro"];
+const FREQS_EDIT = ["Mensal","Bimestral","Trimestral","Semestral","Anual","—"];
+const MESES_CURTOS = ["J","F","M","A","M","J","J","A","S","O","N","D"];
+
+function EditarAtivoPopup({ ticker, ativos, setAtivos, onClose, T }) {
+  const existente = ticker ? ativos.find(a=>a.ticker===ticker) : null;
+  const novo = !existente;
+  const [f, setF] = useState(() => existente ? { ...existente } : {
+    ticker:"", nome:"", cat:"Ação", setor:"Outros", qtd:0, precoMedio:0, cotacao:0, prov:0, freq:"—", meses:[],
+  });
+  const set = (campo,val) => setF(p=>({ ...p, [campo]:val }));
+  const toggleMes = (m) => setF(p=>({ ...p, meses: p.meses.includes(m) ? p.meses.filter(x=>x!==m) : [...p.meses, m].sort((a,b)=>a-b) }));
+
+  const tickerLimpo = String(f.ticker||"").toUpperCase().trim();
+  const duplicado = novo && tickerLimpo && ativos.some(a=>a.ticker===tickerLimpo);
+  const podeSalvar = tickerLimpo.length>=2 && !duplicado;
+
+  const salvar = () => {
+    if (!podeSalvar) return;
+    const limpo = {
+      ...f, ticker:tickerLimpo, nome: f.nome||tickerLimpo,
+      qtd:+f.qtd||0, precoMedio:+f.precoMedio||0, cotacao:+f.cotacao|| +f.precoMedio||0, prov:+f.prov||0,
+      meses: f.meses||[],
+    };
+    if (novo) {
+      registrarLog("edicao", `Novo ativo adicionado: ${limpo.ticker} (${limpo.qtd} cotas)`, { direcao:"interno", origem:"app", detalhe:limpo });
+      setAtivos(prev => [...prev, limpo]);
+    } else {
+      registrarLog("edicao", `Ativo editado: ${limpo.ticker}`, { direcao:"interno", origem:"app", detalhe:limpo });
+      setAtivos(prev => prev.map(a=>a.ticker===ticker ? limpo : a));
+    }
+    onClose();
+  };
+  const excluir = () => {
+    if (!existente) return;
+    if (window.confirm(`Remover ${existente.ticker} da carteira?`)) {
+      registrarLog("edicao", `Ativo removido: ${existente.ticker}`, { direcao:"interno", origem:"app" });
+      setAtivos(prev => prev.filter(a=>a.ticker!==ticker));
+      onClose();
+    }
+  };
+
+  const Campo = ({ label, children }) => (
+    <div style={{ marginBottom:13 }}>
+      <div style={{ fontSize:10, color:T.textMute, fontWeight:600, marginBottom:5, textTransform:"uppercase", letterSpacing:0.5 }}>{label}</div>
+      {children}
+    </div>
+  );
+  const inputStyle = { width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:9, color:T.text, padding:"10px 12px", fontSize:14, outline:"none" };
+
+  return (
+    <div onClick={onClose} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000b", zIndex:1400, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"14px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:440, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+          <div style={{ fontSize:17, fontWeight:800, color:T.text }}>{novo ? "➕ Adicionar ativo" : `✏️ Editar ${existente.ticker}`}</div>
+          <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
+        </div>
+
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}>
+            <Campo label="Ticker">
+              <input value={f.ticker} onChange={e=>set("ticker",e.target.value.toUpperCase())} disabled={!novo}
+                placeholder="BBAS3" style={{ ...inputStyle, fontWeight:700, opacity:novo?1:0.6, fontFamily:"monospace" }}/>
+            </Campo>
+          </div>
+          <div style={{ flex:1.4 }}>
+            <Campo label="Nome"><input value={f.nome} onChange={e=>set("nome",e.target.value)} placeholder="Banco do Brasil" style={inputStyle}/></Campo>
+          </div>
+        </div>
+        {duplicado && <div style={{ fontSize:10, color:T.red, marginTop:-6, marginBottom:10 }}>⚠️ Já existe um ativo com esse ticker.</div>}
+
+        <Campo label="Categoria">
+          <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+            {CATS_EDIT.map(c=>(
+              <button key={c} onClick={()=>set("cat",c)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${f.cat===c?T.accent:T.border}`, background:f.cat===c?T.accent:"transparent", color:f.cat===c?"#fff":T.textMute, cursor:"pointer", fontSize:11, fontWeight:700 }}>{c}</button>
+            ))}
+          </div>
+        </Campo>
+
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Campo label="Quantidade"><input type="number" inputMode="decimal" value={f.qtd} onChange={e=>set("qtd",e.target.value)} style={inputStyle}/></Campo></div>
+          <div style={{ flex:1 }}><Campo label="Setor"><input value={f.setor} onChange={e=>set("setor",e.target.value)} placeholder="Bancos" style={inputStyle}/></Campo></div>
+        </div>
+
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Campo label="Preço médio (R$)"><input type="number" inputMode="decimal" value={f.precoMedio} onChange={e=>set("precoMedio",e.target.value)} style={inputStyle}/></Campo></div>
+          <div style={{ flex:1 }}><Campo label="Cotação (R$)"><input type="number" inputMode="decimal" value={f.cotacao} onChange={e=>set("cotacao",e.target.value)} style={inputStyle}/></Campo></div>
+        </div>
+
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Campo label="Provento / cota (R$)"><input type="number" inputMode="decimal" value={f.prov} onChange={e=>set("prov",e.target.value)} style={inputStyle}/></Campo></div>
+          <div style={{ flex:1 }}>
+            <Campo label="Frequência">
+              <select value={f.freq} onChange={e=>set("freq",e.target.value)} style={{ ...inputStyle, appearance:"auto" }}>
+                {FREQS_EDIT.map(fr=><option key={fr} value={fr}>{fr}</option>)}
+              </select>
+            </Campo>
+          </div>
+        </div>
+
+        <Campo label="Meses que paga proventos">
+          <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+            {MESES_CURTOS.map((nome,i)=>{
+              const m=i+1; const on=f.meses.includes(m);
+              return <button key={i} onClick={()=>toggleMes(m)} style={{ width:34, height:34, borderRadius:8, border:`1px solid ${on?T.green:T.border}`, background:on?T.green:"transparent", color:on?"#06281b":T.textMute, cursor:"pointer", fontSize:12, fontWeight:700 }}>{nome}</button>;
+            })}
+          </div>
+        </Campo>
+
+        {/* preview do valor */}
+        <div style={{ background:T.cardAlt, borderRadius:10, padding:"10px 12px", margin:"4px 0 14px", display:"flex", justifyContent:"space-between", fontSize:12 }}>
+          <span style={{ color:T.textMute }}>Posição</span>
+          <span style={{ color:T.text, fontWeight:700 }}>{fmt((+f.qtd||0)*(+f.cotacao|| +f.precoMedio||0))} · {fmt((+f.prov||0)*(+f.qtd||0)*(f.meses?.length||0))}/ano</span>
+        </div>
+
+        <div style={{ display:"flex", gap:8 }}>
+          {!novo && <button onClick={excluir} style={{ padding:"12px 14px", borderRadius:10, border:`1px solid ${T.red}44`, background:`${T.red}10`, color:T.red, cursor:"pointer", fontSize:13, fontWeight:700 }}>🗑️</button>}
+          <button onClick={onClose} style={{ flex:1, padding:"12px", borderRadius:10, border:`1px solid ${T.borderSoft}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:13, fontWeight:600 }}>Cancelar</button>
+          <button onClick={salvar} disabled={!podeSalvar} style={{ flex:1.4, padding:"12px", borderRadius:10, border:"none", background:podeSalvar?T.green:T.border, color:podeSalvar?"#06281b":T.textFaint, cursor:podeSalvar?"pointer":"default", fontSize:13, fontWeight:700 }}>{novo?"➕ Adicionar":"✓ Salvar"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
   const [filtroCat, setFiltroCat] = useState("TODOS");
   const [busca, setBusca] = useState("");
@@ -1999,12 +2140,19 @@ function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
         </div>
       )}
 
-      {/* botão importar em massa */}
-      <button onClick={()=>setShowImport(true)} style={{
-        width:"100%", padding:"12px", borderRadius:12, marginBottom:14, cursor:"pointer",
-        border:`1px solid ${T.green}55`, background:`${T.green}12`, color:T.green, fontSize:13, fontWeight:700,
-        display:"flex", alignItems:"center", justifyContent:"center", gap:8
-      }}>📋 Importar em massa (colar texto)</button>
+      {/* botões adicionar + importar em massa */}
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        <button onClick={()=>abrirEditorAtivo(null)} style={{
+          flex:1, padding:"12px", borderRadius:12, cursor:"pointer",
+          border:`1px solid ${T.accent}`, background:T.accent, color:"#fff", fontSize:13, fontWeight:700,
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6
+        }}>➕ Adicionar ativo</button>
+        <button onClick={()=>setShowImport(true)} style={{
+          flex:1, padding:"12px", borderRadius:12, cursor:"pointer",
+          border:`1px solid ${T.green}55`, background:`${T.green}12`, color:T.green, fontSize:13, fontWeight:700,
+          display:"flex", alignItems:"center", justifyContent:"center", gap:6
+        }}>📋 Importar</button>
+      </div>
 
       {showImport && <ImportarMassa ativos={ativos} setAtivos={setAtivos} onClose={()=>setShowImport(false)} T={T}/>}
 
@@ -2756,51 +2904,40 @@ function gerarEstagios(metaMensal, nEstagios) {
   }));
 }
 
-function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, T }) {
-  const [aberta, setAberta] = useState(false);
+function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, onAbrirAnalises, T }) {
+  const [nivel, setNivel] = useState(0); // 0=base, 1=+500, 2=+1500
+  const niveis = [{ lb:"Base", extra:0 }, { lb:"+R$500", extra:500 }, { lb:"+R$1.500", extra:1500 }];
+  const metaEfetiva = metaMensal + niveis[nivel].extra;
   const N = 5; // numero de estagios
-  const estagios = gerarEstagios(metaMensal, N);
-  const pctGeral = Math.min((valorAtual / metaMensal) * 100, 100);
+  const estagios = gerarEstagios(metaEfetiva, N);
+  const pctGeral = Math.min((valorAtual / metaEfetiva) * 100, 100);
   const estagiosAlcancados = estagios.filter(e => valorAtual >= e.valor).length;
-  const metaBatida = valorAtual >= metaMensal;
-
-  // proximo estagio ainda nao alcancado (para o card "quanto falta")
+  const metaBatida = valorAtual >= metaEfetiva;
   const proximoEstagio = estagios.find(e => valorAtual < e.valor);
   const faltaProximo = proximoEstagio ? proximoEstagio.valor - valorAtual : 0;
-  const faltaMetaFinal = metaBatida ? 0 : metaMensal - valorAtual;
+  const faltaMetaFinal = metaBatida ? 0 : metaEfetiva - valorAtual;
+  const stop = (fn)=>(e)=>{ e.stopPropagation(); fn&&fn(); };
 
   return (
-    <div style={{ marginTop:12, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"11px 13px" }}>
-      {/* cabeçalho compacto — sempre visível, clicável para expandir */}
-      <div onClick={()=>setAberta(v=>!v)} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, minWidth:0 }}>
-          <span style={{ fontSize:11, color:T.textFaint, transform:aberta?"rotate(90deg)":"none", transition:"transform 0.2s", display:"inline-block" }}>▶</span>
-          <span style={{ fontSize:14 }}>🎯</span>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ display:"flex", alignItems:"baseline", gap:5 }}>
-              <span style={{ fontSize:14, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
-              <span style={{ fontSize:10, color:T.textFaint }}>/ {fmt(metaMensal)}</span>
-            </div>
-            {/* mini barra */}
-            <div style={{ height:4, background:T.cardAlt, borderRadius:3, overflow:"hidden", marginTop:3 }}>
-              <div style={{ height:"100%", width:`${pctGeral}%`, background:metaBatida?T.green:`linear-gradient(to right, ${CORES_ESTAGIOS[0]}, ${CORES_ESTAGIOS[3]})`, borderRadius:3 }}/>
-            </div>
-          </div>
-        </div>
-        <div style={{ textAlign:"right", marginLeft:10 }}>
-          {metaBatida
-            ? <span style={{ fontSize:11, fontWeight:700, color:T.green }}>✓ batida</span>
-            : <><div style={{ fontSize:12, fontWeight:800, color:"#ef4444" }}>faltam {fmtK(faltaProximo)}</div><div style={{ fontSize:8, color:T.textFaint }}>p/ {fmtK(proximoEstagio.valor)}</div></>}
-        </div>
+    <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"13px" }}>
+      {/* cabeçalho: título + ver análise */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+        <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🎯 Meta de proventos</span>
+        <button onClick={stop(onAbrirAnalises)} style={{ fontSize:10, fontWeight:700, color:T.accentSoft, background:T.accentBg, border:`1px solid ${T.accentBorder}55`, borderRadius:7, padding:"5px 10px", cursor:"pointer" }}>ver análise ›</button>
       </div>
-
-      {/* conteúdo expandido */}
-      {aberta && (<>
-      <div style={{ display:"flex", justifyContent:"flex-end", marginTop:10, marginBottom:8 }}>
-        <button onClick={onConfigurar} title="Definir meta" style={{
-          padding:"5px 10px", borderRadius:8, border:`1px solid ${T.border}`,
-          background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11, fontWeight:600
-        }}>🎯 Definir meta</button>
+      {/* níveis de meta — alternam ao vivo */}
+      <div style={{ display:"flex", gap:5, marginBottom:12 }}>
+        {niveis.map((n,i)=>(
+          <button key={i} onClick={stop(()=>setNivel(i))} style={{ flex:1, padding:"6px 0", borderRadius:7, border:`1px solid ${nivel===i?T.accent:T.border}`, background:nivel===i?T.accent:T.cardAlt, color:nivel===i?"#fff":T.textMute, cursor:"pointer", fontSize:10, fontWeight:700 }}>{n.lb}</button>
+        ))}
+      </div>
+      {/* valor atual / meta + definir base */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:12 }}>
+        <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+          <span style={{ fontSize:20, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
+          <span style={{ fontSize:11, color:T.textFaint }}>/ {fmt(metaEfetiva)}/mês</span>
+        </div>
+        <button onClick={stop(onConfigurar)} title="Definir meta base" style={{ fontSize:10, fontWeight:700, color:T.accentSoft, background:"none", border:"none", cursor:"pointer", padding:0 }}>🎯 Definir base</button>
       </div>
 
       {/* trilha visual com setas/checkpoints */}
@@ -2924,7 +3061,123 @@ function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, T }) {
           </>
         )}
       </div>
-      </>)}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CARROSSEL DE METAS — 3 painéis deslizáveis (Proventos / Contas / Reserva Plus)
+// Cada painel leva à aba Análises. Proventos tem 3 níveis alternáveis ao vivo.
+// ════════════════════════════════════════════════════════════════════════════
+const ETFS_GLOBAIS = ["VWRA11","IVVB11","NASD11","XINA11","BNDX11","WRLD11"];
+
+function CarrosselMetas({ ativos, mediaMes, metaMensal, custoVida={}, onConfigurar, onAbrirAnalises, onAbrirContas, onAbrirReserva, T }) {
+  // ── CONTAS A PAGAR (dados reais da página Custo de Vida) ──
+  const contasLista = CUSTOS_DEF.map(c=>({ ...c, valor:+custoVida[c.id]||0 })).filter(c=>c.valor>0).sort((a,b)=>a.valor-b.valor);
+  const custoTotal = contasLista.reduce((s,c)=>s+c.valor,0);
+  let _acc=0; const marcos = contasLista.map(g=>{ _acc+=g.valor; return { ...g, alvo:_acc }; });
+  const contasPagas = marcos.filter(m=>mediaMes>=m.alvo).length;
+  const contasPct = custoTotal>0 ? Math.min(mediaMes/custoTotal*100,100) : 0;
+
+  // ── RESERVA PLUS (Tesouro Direto + CDB/LCI/LCA + ETFs globais) ──
+  const ehReserva = (a) => a.cat==="Tesouro" || ETFS_GLOBAIS.includes(a.ticker) || /tesouro|cdb|lci|lca|rdb|cra|cri/i.test(String(a.nome)+a.ticker);
+  const reservaItens = ativos.filter(a=>a.qtd>0 && ehReserva(a)).map(a=>({ ...a, valor:a.qtd*a.cotacao })).sort((x,y)=>y.valor-x.valor);
+  const reservaValor = reservaItens.reduce((s,a)=>s+a.valor,0);
+  const patrimonio = ativos.filter(a=>a.qtd>0).reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  const reservaAlvo = Math.max(patrimonio*0.25, 1000);
+  const reservaPct = Math.min(reservaValor/reservaAlvo*100, 100);
+
+  const stop = (fn) => (e)=>{ e.stopPropagation(); fn&&fn(); };
+  const Barra = ({ pct, cor }) => (
+    <div style={{ height:8, background:T.cardAlt, borderRadius:5, overflow:"hidden", marginTop:8 }}>
+      <div style={{ height:"100%", width:`${pct}%`, background:cor, borderRadius:5, transition:"width 0.4s ease" }}/>
+    </div>
+  );
+  const painelStyle = { flex:"0 0 88%", scrollSnapAlign:"center", background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", cursor:"pointer" };
+  const btnVer = (fn) => (
+    <button onClick={stop(fn)} style={{ fontSize:9, fontWeight:700, color:T.accentSoft, background:T.accentBg, border:`1px solid ${T.accentBorder}55`, borderRadius:7, padding:"4px 9px", cursor:"pointer" }}>ver detalhe ›</button>
+  );
+
+  return (
+    <div style={{ marginTop:12 }}>
+      <div style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:8 }}>🎯 Minhas metas · deslize ›</div>
+      <div style={{ display:"flex", gap:12, overflowX:"auto", paddingBottom:6, scrollSnapType:"x mandatory" }}>
+
+        {/* PAINEL 1 — META DE PROVENTOS (timeline detalhada + 3 níveis) */}
+        <div style={{ flex:"0 0 88%", scrollSnapAlign:"center" }}>
+          <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} onConfigurar={onConfigurar} onAbrirAnalises={onAbrirAnalises} T={T} />
+        </div>
+
+        {/* PAINEL 2 — CONTAS PAGAS (dados reais da página Custo de Vida) */}
+        <div style={painelStyle} onClick={onAbrirContas}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🧾 Contas pagas</span>{btnVer(onAbrirContas)}
+          </div>
+          {custoTotal>0 ? (<>
+            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:12 }}>
+              <span style={{ fontSize:26, fontWeight:800, color: contasPct>=100?T.green:T.cyan }}>{contasPagas}<span style={{ fontSize:15, color:T.textFaint }}>/{marcos.length}</span></span>
+              <span style={{ fontSize:11, color:T.textFaint }}>contas pagas pelos proventos</span>
+            </div>
+            <Barra pct={contasPct} cor={contasPct>=100?T.green:T.cyan}/>
+            <div style={{ fontSize:9, color:T.textMute, marginTop:8, marginBottom:4 }}>Proventos cobrem <strong style={{ color:contasPct>=100?T.green:T.cyan }}>{contasPct.toFixed(0)}%</strong> de {fmt(custoTotal)}/mês</div>
+            {/* lista dos gastos (acumulado, menor → maior) */}
+            <div style={{ marginTop:6 }}>
+              {marcos.map(m=>{
+                const coberto = mediaMes >= m.alvo;
+                const pctM = Math.min(mediaMes/m.alvo*100, 100);
+                const falta = Math.max(m.alvo - mediaMes, 0);
+                return (
+                  <div key={m.id} style={{ background: coberto?`${T.green}12`:T.cardAlt, border:`1px solid ${coberto?T.green+"44":T.border}`, borderRadius:9, padding:"8px 10px", marginBottom:5 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:11, fontWeight:700, color:T.textDim, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{coberto?"✅":m.emoji} {m.label}</span>
+                      <span style={{ fontSize:11, fontWeight:800, color: coberto?T.green:T.amber, flexShrink:0 }}>{coberto ? "Coberto ✓" : `faltam ${fmt(falta)}`}</span>
+                    </div>
+                    <div style={{ fontSize:8, color:T.textFaint, marginTop:1 }}>precisa de {fmt(m.alvo)}/mês (acumulado)</div>
+                    <div style={{ height:4, background:T.bg, borderRadius:3, overflow:"hidden", marginTop:4 }}>
+                      <div style={{ height:"100%", width:`${pctM}%`, background: coberto?T.green:T.amber, borderRadius:3 }}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {contasPagas<marcos.length
+              ? <div style={{ fontSize:9, color:T.textFaint, marginTop:3, textAlign:"center" }}>{contasPagas}/{marcos.length} gastos cobertos pelos proventos</div>
+              : <div style={{ fontSize:9, color:T.green, fontWeight:700, marginTop:3, textAlign:"center" }}>✓ Todas as contas cobertas pelos proventos!</div>}
+          </>) : (
+            <div style={{ marginTop:16, textAlign:"center" }}>
+              <div style={{ fontSize:11, color:T.textMute, marginBottom:8 }}>Você ainda não cadastrou suas contas fixas.</div>
+              <span style={{ fontSize:10, fontWeight:700, color:T.accentSoft }}>Toque para configurar →</span>
+            </div>
+          )}
+        </div>
+
+        {/* PAINEL 3 — RESERVA PLUS (Tesouro + CDB/LCI + ETFs globais) */}
+        <div style={painelStyle} onClick={onAbrirReserva}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🌍 Reserva Plus</span>{btnVer(onAbrirReserva)}
+          </div>
+          <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:12 }}>
+            <span style={{ fontSize:26, fontWeight:800, color:T.amber }}>{fmt(reservaValor)}</span>
+            <span style={{ fontSize:11, color:T.textFaint }}>/ {fmt(reservaAlvo)}</span>
+          </div>
+          <Barra pct={reservaPct} cor={T.amber}/>
+          {reservaItens.length>0 ? (
+            <div style={{ marginTop:10 }}>
+              <div style={{ fontSize:9, color:T.textFaint, marginBottom:5 }}>Títulos que compõem ({reservaPct.toFixed(0)}% do alvo de 25%):</div>
+              {reservaItens.slice(0,4).map(a=>(
+                <div key={a.ticker} style={{ display:"flex", justifyContent:"space-between", marginBottom:3, gap:8 }}>
+                  <span style={{ fontSize:10, color:T.textDim, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{/tesouro/i.test(String(a.nome))?"🏛️":ETFS_GLOBAIS.includes(a.ticker)?"🌎":"🔒"} {a.nome}</span>
+                  <span style={{ fontSize:10, color:T.amber, fontWeight:700, flexShrink:0 }}>{fmt(a.valor)}</span>
+                </div>
+              ))}
+              {reservaItens.length>4 && <div style={{ fontSize:9, color:T.textFaint, marginTop:2 }}>+{reservaItens.length-4} outros títulos</div>}
+            </div>
+          ) : (
+            <div style={{ fontSize:9, color:T.textFaint, marginTop:10 }}>Sem títulos de reserva ainda (Tesouro, CDB, ETFs globais).</div>
+          )}
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -3722,6 +3975,8 @@ export default function App() {
   // ── CONFIGURAÇÕES (engrenagem) — todas salvas na memória ────────────────
   const [showConfig, setShowConfig] = useState(false);
   const [showCarteira, setShowCarteira] = useState(false);
+  const [editandoTicker, setEditandoTicker] = useState(undefined); // undefined=fechado, null=novo, string=editar
+  useEffect(() => registrarEditorAtivo((tk)=>setEditandoTicker(tk)), []);
   const [layout,   setLayout]   = useEstadoSalvo("layout", "celular");  // "celular" | "tv"
   const [fontEsc,  setFontEsc]  = useEstadoSalvo("fonte", 1);           // 0.85 | 1 | 1.15 | 1.35
   const [densidade,setDensidade]= useEstadoSalvo("densidade", "confortavel"); // "compacto" | "confortavel"
@@ -3809,7 +4064,7 @@ export default function App() {
   const abaAtual = TODAS_ABAS.find(a=>a.id===aba) || TODAS_ABAS[0];
 
   return (
-    <div className={T.espacoso ? "app-espacoso" : ""} style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:80,transition:"background 0.3s" }}>
+    <div className={T.espacoso ? "app-espacoso" : ""} style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:100,transition:"background 0.3s" }}>
 
       {/* WRAPPER DE ESCALA — transform:scale escala TUDO (px fixos inclusive).
           Usa 'zoom': escala tudo (px fixos inclusive) e reflui naturalmente,
@@ -3858,7 +4113,7 @@ export default function App() {
         )}
         {/* MODO FOCO — esconde KPIs e meta nas telas de trabalho */}
         {!["editar","cartao","custovida","chat"].includes(aba) && (<>
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:8,marginTop:16 }}>
+        <div style={{ display:"flex", gap:8, marginTop:16, overflowX:"auto", paddingBottom:6, scrollSnapType:"x mandatory" }}>
           {[
             {l:"Média/mês",v:fmt(mediaMes),c:T.accentSoft},
             {l:"Maior mês",v:fmt(maxMes),  c:T.green},
@@ -3867,15 +4122,15 @@ export default function App() {
             {l:"Ações/ano",v:fmt(totAcao), c:T.accent},
             {l:"Média/mês",v:fmt(totalAnual/12), c:T.textDim},
           ].map((x,i)=>(
-            <div key={i} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px" }}>
-              <div style={{ fontSize:9,color:T.textFaint,marginBottom:2 }}>{x.l}</div>
-              <div style={{ fontSize:12,fontWeight:700,color:x.c }}>{x.v}</div>
+            <div key={i} style={{ flex:"0 0 31%", minWidth:104, scrollSnapAlign:"start", background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 11px" }}>
+              <div style={{ fontSize:9,color:T.textFaint,marginBottom:2,whiteSpace:"nowrap" }}>{x.l}</div>
+              <div style={{ fontSize:13,fontWeight:700,color:x.c,whiteSpace:"nowrap" }}>{x.v}</div>
             </div>
           ))}
         </div>
 
         {/* TRILHA DE METAS — progressão por estágios */}
-        <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} onConfigurar={()=>setShowMeta(true)} T={T} />
+        <CarrosselMetas ativos={ativos} mediaMes={mediaMes} metaMensal={metaMensal} custoVida={custoVida} onConfigurar={()=>setShowMeta(true)} onAbrirAnalises={()=>setAba("analises")} onAbrirContas={()=>setAba("custovida")} onAbrirReserva={()=>setShowCarteira(true)} T={T} />
         </>)}
       </div>
 
@@ -3885,7 +4140,44 @@ export default function App() {
       )}
 
       {/* PAINEL DE CONFIGURAÇÕES (modal) */}
-      {showCarteira && <TelaCarteira ativos={ativos} onClose={()=>setShowCarteira(false)} T={T}/>}
+      {showCarteira && <TelaCarteira ativos={ativos} onClose={()=>setShowCarteira(false)} onEditar={()=>setAba("editar")} T={T}/>}
+
+      {/* POPUP GLOBAL DE EDITAR/ADICIONAR ATIVO — abre de qualquer lugar */}
+      {editandoTicker!==undefined && (
+        <EditarAtivoPopup ticker={editandoTicker} ativos={ativos} setAtivos={setAtivos} onClose={()=>setEditandoTicker(undefined)} T={T}/>
+      )}
+
+      {/* MENU FLUTUANTE — Home no centro + atalhos, sempre leva à Home */}
+      {!showCarteira && editandoTicker===undefined && (
+        <div style={{ position:"fixed", left:0, right:0, bottom:14, display:"flex", justifyContent:"center", zIndex:900, pointerEvents:"none" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:4, background:T.card, border:`1px solid ${T.borderSoft}`, borderRadius:30, padding:"7px 10px", boxShadow:"0 8px 30px #0006", pointerEvents:"auto" }}>
+            {[
+              { id:"analises",   ic:"🔬", lb:"Análises" },
+              { id:"calendario", ic:"📅", lb:"Agenda" },
+              { id:"__home__",   ic:"🏠", lb:"Início" },
+              { id:"ranking",    ic:"🏆", lb:"Ranking" },
+              { id:"editar",     ic:"✏️", lb:"Editar" },
+            ].map(item=>{
+              const home = item.id==="__home__";
+              const ativoTab = home ? aba==="painel" : aba===item.id;
+              return (
+                <button key={item.id} onClick={()=>setAba(home?"painel":item.id)} title={item.lb} style={{
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:1, cursor:"pointer", border:"none",
+                  background: home ? T.accent : (ativoTab ? T.accentBg : "transparent"),
+                  color: home ? "#fff" : (ativoTab ? T.accent : T.textMute),
+                  borderRadius: home ? "50%" : 14,
+                  width: home ? 52 : 52, height: home ? 52 : 46,
+                  padding:0, transform: home ? "translateY(-6px)" : "none",
+                  boxShadow: home ? `0 6px 16px ${T.accent}66` : "none",
+                }}>
+                  <span style={{ fontSize: home ? 22 : 17 }}>{item.ic}</span>
+                  <span style={{ fontSize:8, fontWeight:700 }}>{item.lb}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {showConfig && (
         <PainelConfig
@@ -4007,7 +4299,8 @@ export default function App() {
       )}
 
       <div key={aba} className="tela-anim" style={{ padding:"14px" }}>
-        {/* TÍTULO DA TELA ATUAL (substitui a barra de abas) */}
+        {/* TÍTULO DA TELA ATUAL (substitui a barra de abas) — oculto no Painel (lá o "Boa noite" é o destaque) */}
+        {aba!=="painel" && (
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20 }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ fontSize:22 }}>{abaAtual.emoji}</span>
@@ -4020,6 +4313,7 @@ export default function App() {
             ☰ Menu
           </button>
         </div>
+        )}
 
         {/* FILTROS — seletor segmentado (só em gráfico/ranking) */}
         {(aba==="analises"||aba==="ranking") && (
