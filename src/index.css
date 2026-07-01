@@ -33,7 +33,7 @@ input, select, button {
   to   { opacity: 1; transform: translateY(0); }
 }
 .tela-anim {
-  animation: fadeInUp 0.28s ease-out;
+  animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Botões com leve resposta ao toque */
@@ -153,3 +153,7 @@ button:active {
 .app-espacoso button {
   letter-spacing: 0.2px;
 }
+
+/* Cursor piscando do streaming da IA */
+@keyframes piscar { 0%,50%{opacity:1;} 51%,100%{opacity:0;} }
+.cursor-pisca { animation: piscar 1s step-end infinite; margin-left:1px; font-weight:400; }
