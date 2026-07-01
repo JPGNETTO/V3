@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, Cell, Area, AreaChart, ReferenceLine, ReferenceDot,
   PieChart, Pie
 } from "recharts";
@@ -11,6 +12,8 @@ import {
 // ════════════════════════════════════════════════════════════════════════════
 // Tipos de movimento que NÃO mexem na quantidade (são proventos/atualizações)
 const B3_MOV_IGNORAR = new Set(["Rendimento","Dividendo","Juros Sobre Capital Próprio","Atualização"]);
+// Tipos de movimento que SÃO proventos recebidos (entram como "realizado")
+const B3_MOV_PROVENTO = new Set(["Rendimento","Dividendo","Juros Sobre Capital Próprio","Juros","Amortização","Rendimento Tributado","Leilão de Fração"]);
 function b3Num(v) {
   if (v == null || v === "") return NaN;
   if (typeof v === "number") return v;
@@ -27,6 +30,18 @@ function b3TickerDeProduto(produto) {
   if (/^tesouro/i.test(p)) return p.split(" - ")[0].trim(); // Tesouro: usa o nome
   return p.split(" - ")[0].trim().toUpperCase();
 }
+// Converte data da B3 ("dd/mm/aaaa") para ISO "aaaa-mm-dd"
+function b3Data(v) {
+  if (!v) return null;
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  const s = String(v).trim();
+  const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+  const m2 = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m2) return m2[0];
+  return null;
+}
+
 // Recebe as linhas (array de objetos) da aba Movimentação e devolve posições
 function parseB3Movimentacao(linhas) {
   const pos = {};
@@ -35,6 +50,7 @@ function parseB3Movimentacao(linhas) {
     const mov = String(r["Movimentação"] ?? r["Movimentacao"] ?? "").trim();
     const es  = String(r["Entrada/Saída"] ?? r["Entrada/Saida"] ?? "").trim();
     const prod = r["Produto"];
+    const data = b3Data(r["Data"] ?? r["Data do Negócio"] ?? r["Data Negócio"]);
     if (!prod) continue;
     if (B3_MOV_IGNORAR.has(mov)) { ignoradas++; continue; }
     const qtd = b3Num(r["Quantidade"]);
@@ -43,12 +59,18 @@ function parseB3Movimentacao(linhas) {
     if (!isFinite(preco)) preco = null;
     const tk = b3TickerDeProduto(prod);
     if (!tk) continue;
-    if (!pos[tk]) pos[tk] = { qtd:0, custo:0, qc:0 };
+    if (!pos[tk]) pos[tk] = { qtd:0, custo:0, qc:0, primeiraCompra:null, ultimaCompra:null, movs:[] };
     if (es === "Credito" || es === "Crédito") {
       pos[tk].qtd += qtd;
       if (preco) { pos[tk].custo += qtd*preco; pos[tk].qc += qtd; }
+      if (data) {
+        if (!pos[tk].primeiraCompra || data < pos[tk].primeiraCompra) pos[tk].primeiraCompra = data;
+        if (!pos[tk].ultimaCompra || data > pos[tk].ultimaCompra) pos[tk].ultimaCompra = data;
+        pos[tk].movs.push({ data, qtd:+qtd, preco:preco||0, tipo:"compra" });
+      }
     } else if (es === "Debito" || es === "Débito") {
       pos[tk].qtd -= qtd;
+      if (data) pos[tk].movs.push({ data, qtd:-qtd, preco:preco||0, tipo:"venda" });
     }
     lidas++;
   }
@@ -60,10 +82,181 @@ function parseB3Movimentacao(linhas) {
     const qtdFinal = ehTesouro ? +p.qtd.toFixed(4) : Math.round(p.qtd); // Tesouro tem frações
     if (qtdFinal === 0) continue;
     const pm = p.qc > 0 ? +(p.custo/p.qc).toFixed(2) : null;
-    itens.push({ ticker:tk, qtd:qtdFinal, precoMedio:pm, cotacao:null });
+    p.movs.sort((a,b)=>a.data<b.data?-1:1);
+    itens.push({ ticker:tk, qtd:qtdFinal, precoMedio:pm, cotacao:null, dataCompra:p.primeiraCompra, ultimaCompra:p.ultimaCompra, movimentacoes:p.movs });
   }
   itens.sort((a,b)=>a.ticker.localeCompare(b.ticker));
   return { itens, lidas, ignoradas };
+}
+
+// Extrai os PROVENTOS RECEBIDOS (Rendimento/Dividendo/JCP/Amortização) da planilha B3.
+// Retorna { porMes: {"2026-01": 123.45, ...}, total, registros: [{data, ticker, valor, tipo}] }
+function parseProventosRecebidos(linhas) {
+  const porMes = {};
+  const registros = [];
+  let total = 0;
+  for (const r of linhas) {
+    const mov = String(r["Movimentação"] ?? r["Movimentacao"] ?? "").trim();
+    if (!B3_MOV_PROVENTO.has(mov)) continue;
+    const es = String(r["Entrada/Saída"] ?? r["Entrada/Saida"] ?? "").trim();
+    if (es && !(es === "Credito" || es === "Crédito")) continue; // só entradas
+    const valor = b3Num(r["Valor da Operação"] ?? r["Valor"] ?? r["Valor da Operacao"]);
+    if (!isFinite(valor) || valor <= 0) continue;
+    const data = b3Data(r["Data"] ?? r["Data do Negócio"]);
+    if (!data) continue;
+    const mesKey = data.slice(0,7); // YYYY-MM
+    porMes[mesKey] = +((porMes[mesKey] || 0) + valor).toFixed(2);
+    total += valor;
+    registros.push({ data, ticker: b3TickerDeProduto(r["Produto"]) || "—", valor:+valor.toFixed(2), tipo: mov });
+  }
+  return { porMes, total:+total.toFixed(2), registros };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CONEXÃO COM O SERVIDOR — auto-detect (Tailscale → Local → localhost)
+// ════════════════════════════════════════════════════════════════════════════
+const SERVIDORES = [
+  { nome:"Tailscale", url:"http://100.100.195.84:4000" },
+  { nome:"Local",     url:"http://192.168.1.17:4000" },
+  { nome:"localhost", url:"http://localhost:4000" },
+];
+async function detectarServidor(aoTestar) {
+  for (const s of SERVIDORES) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), 3000);
+      const r = await fetch(`${s.url}/health`, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (r.ok) {
+        const d = await r.json().catch(()=>({}));
+        aoTestar && aoTestar(s, true);
+        if (d.status === "ok" || r.ok) return s;
+      } else { aoTestar && aoTestar(s, false); }
+    } catch(e) { aoTestar && aoTestar(s, false); }
+  }
+  return null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// RELATÓRIO PDF — gera um PDF da carteira (patrimônio, proventos, composição)
+// ════════════════════════════════════════════════════════════════════════════
+function gerarRelatorioPDF({ ativos, metaMensal, custoVida, totalAnual, provEsteMes, mediaMes, patrimonioTotal }) {
+  const doc = new jsPDF({ unit:"mm", format:"a4" });
+  const W = 210; const M = 16; let y = 0;
+  const VERDE = [79,97,71], CINZA=[120,128,118], ESCURO=[51,64,47], CLARO=[236,238,231], CIANO=[109,150,144];
+  const real = (v)=>"R$ "+(v||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const linha = (yy)=>{ doc.setDrawColor(220,224,214); doc.line(M,yy,W-M,yy); };
+  const checkPage = (precisa=10)=>{ if (y+precisa>285){ doc.addPage(); y=20; } };
+
+  // cabeçalho
+  doc.setFillColor(...VERDE); doc.rect(0,0,W,30,"F");
+  doc.setTextColor(255,255,255); doc.setFont("helvetica","bold"); doc.setFontSize(18);
+  doc.text("Carteira de Proventos", M, 13);
+  doc.setFont("helvetica","normal"); doc.setFontSize(10);
+  const hoje = new Date().toLocaleDateString("pt-BR",{ day:"2-digit", month:"long", year:"numeric" });
+  doc.text("Relatório gerado em "+hoje, M, 21);
+  y = 40;
+
+  // números principais
+  const ativosVivos = ativos.filter(a=>a.qtd>0);
+  doc.setTextColor(...CINZA); doc.setFontSize(9); doc.setFont("helvetica","normal");
+  doc.text("PATRIMÔNIO TOTAL", M, y);
+  doc.text("DIVIDENDOS / ANO", M+62, y);
+  doc.text("RECEBIDO ESTE MÊS", M+124, y);
+  y += 7;
+  doc.setTextColor(...ESCURO); doc.setFont("helvetica","bold"); doc.setFontSize(15);
+  doc.text(real(patrimonioTotal), M, y);
+  doc.setTextColor(...VERDE); doc.text(real(totalAnual), M+62, y);
+  doc.setTextColor(...CIANO); doc.text(real(provEsteMes), M+124, y);
+  y += 6;
+  doc.setTextColor(...CINZA); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+  doc.text(`${ativosVivos.length} ativos`, M, y);
+  doc.text(`média ${real(mediaMes)}/mês`, M+62, y);
+  y += 8; linha(y); y += 8;
+
+  // composição por classe
+  doc.setTextColor(...ESCURO); doc.setFont("helvetica","bold"); doc.setFontSize(11);
+  doc.text("Composição por classe", M, y); y += 7;
+  const total = ativosVivos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  const grupos = {};
+  ativosVivos.forEach(a=>{ const c=classeDe(a); grupos[c]=(grupos[c]||0)+a.qtd*a.cotacao; });
+  const ordenadas = Object.entries(grupos).sort((a,b)=>b[1]-a[1]);
+  const corClasse = (c)=>{ const h=(CLASSE_COR[c]||"#4f6147").replace("#",""); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; };
+  ordenadas.forEach(([cl,val])=>{
+    checkPage(8);
+    const pct = total>0?val/total*100:0;
+    doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(...ESCURO);
+    doc.text(cl, M, y);
+    doc.setTextColor(...CINZA); doc.text(real(val)+`  (${pct.toFixed(1)}%)`, W-M, y, { align:"right" });
+    y += 2.5;
+    doc.setFillColor(...CLARO); doc.rect(M, y, W-2*M, 2.5, "F");
+    doc.setFillColor(...corClasse(cl)); doc.rect(M, y, (W-2*M)*pct/100, 2.5, "F");
+    y += 7;
+  });
+  y += 4; linha(y); y += 8;
+
+  // lista de ativos
+  checkPage(20);
+  doc.setTextColor(...ESCURO); doc.setFont("helvetica","bold"); doc.setFontSize(11);
+  doc.text("Ativos", M, y); y += 7;
+  doc.setFontSize(8); doc.setTextColor(...CINZA); doc.setFont("helvetica","bold");
+  doc.text("ATIVO", M, y); doc.text("QTD", M+70, y, {align:"right"}); doc.text("P.MÉDIO", M+100, y, {align:"right"});
+  doc.text("COTAÇÃO", M+130, y, {align:"right"}); doc.text("VALOR", W-M, y, {align:"right"}); y += 2;
+  linha(y); y += 5;
+  ativosVivos.sort((a,b)=>b.qtd*b.cotacao-a.qtd*a.cotacao).forEach(a=>{
+    checkPage(7);
+    doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(...ESCURO);
+    doc.text(String(a.ticker).slice(0,28), M, y);
+    doc.setFont("helvetica","normal"); doc.setTextColor(...CINZA);
+    doc.text(String(a.qtd<1?a.qtd.toFixed(2):a.qtd), M+70, y, {align:"right"});
+    doc.text(real(a.precoMedio).replace("R$ ",""), M+100, y, {align:"right"});
+    doc.text(real(a.cotacao).replace("R$ ",""), M+130, y, {align:"right"});
+    doc.setTextColor(...ESCURO); doc.setFont("helvetica","bold");
+    doc.text(real(a.qtd*a.cotacao), W-M, y, {align:"right"});
+    y += 5.5;
+  });
+  y += 3; linha(y); y += 8;
+
+  // metas resumo
+  checkPage(30);
+  doc.setTextColor(...ESCURO); doc.setFont("helvetica","bold"); doc.setFontSize(11);
+  doc.text("Metas", M, y); y += 7;
+  doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  const metaPct = metaMensal>0?Math.min(mediaMes/metaMensal*100,100):0;
+  doc.setTextColor(...CINZA);
+  doc.text(`Meta de proventos: ${real(mediaMes)} / ${real(metaMensal)} por mês (${metaPct.toFixed(0)}%)`, M, y); y += 6;
+  const custoTotal = Object.values(custoVida||{}).reduce((s,v)=>s+(+v||0),0);
+  if (custoTotal>0) { const cp=Math.min(mediaMes/custoTotal*100,100); doc.text(`Contas fixas cobertas: ${cp.toFixed(0)}% de ${real(custoTotal)}/mês`, M, y); y += 6; }
+  const reserva = ativosVivos.filter(a=>a.cat==="Tesouro"||ETFS_GLOBAIS.includes(a.ticker)||/cdb|lci|lca/i.test(String(a.nome))).reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  doc.text(`Reserva Plus (Tesouro + ETFs globais): ${real(reserva)}`, M, y); y += 10;
+
+  // rodapé
+  const paginas = doc.internal.getNumberOfPages();
+  for (let p=1;p<=paginas;p++){ doc.setPage(p); doc.setFontSize(7); doc.setTextColor(...CINZA);
+    doc.text("Gerado pelo app Carteira de Proventos · estimativas informativas, não é recomendação de investimento", W/2, 292, {align:"center"});
+    doc.text(`${p}/${paginas}`, W-M, 292, {align:"right"});
+  }
+
+  const nomeArq = `carteira-proventos-${new Date().toISOString().slice(0,10)}.pdf`;
+  // No Android (app empacotado): salva e abre a tela de compartilhar. No navegador: baixa direto.
+  (async () => {
+    if (typeof window!=="undefined" && window.Capacitor?.isNativePlatform?.()) {
+      try {
+        const fsMod = await import("@capacitor/filesystem");
+        const shareMod = await import("@capacitor/share");
+        const base64 = doc.output("datauristring").split(",")[1];
+        const res = await fsMod.Filesystem.writeFile({ path:nomeArq, data:base64, directory:fsMod.Directory.Cache });
+        await shareMod.Share.share({ title:"Relatório da carteira", text:"Relatório da minha carteira de proventos", url:res.uri });
+        return;
+      } catch(e) { /* se falhar, tenta o download normal abaixo */ }
+    }
+    try { doc.save(nomeArq); }
+    catch(e) {
+      try { const url = doc.output("bloburl"); window.open(url, "_blank"); }
+      catch(e2) { alert("Não consegui gerar o PDF neste dispositivo."); }
+    }
+  })();
+  return nomeArq;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -608,7 +801,7 @@ function DetalheMes({ ativos, idx, filtro, T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD DA CARTEIRA — composição (pizza) + dinheiro (barras), por grupo
 // ════════════════════════════════════════════════════════════════════════════
-function PainelCarteira({ ativos, historico = [], T }) {
+function PainelCarteira({ ativos, historico = [], proventosRecebidos, T }) {
   const [agrupar, setAgrupar] = useState("cat");   // "cat" | "setor"
   const [metrica, setMetrica] = useState("atual"); // "atual" | "investido"
   const [filtroCat, setFiltroCat] = useState("TUDO"); // "TUDO" | "FII" | "Ação" | "Cripto"
@@ -804,6 +997,9 @@ function PainelCarteira({ ativos, historico = [], T }) {
 
       {/* PROJEÇÃO + CONTRIBUIÇÃO POR ATIVO */}
       <ProjecaoProventos ativos={ativos} T={T}/>
+
+      {/* PREVISTO vs REALIZADO no ano */}
+      <PrevistoVsRealizado ativos={ativos} proventosRecebidos={proventosRecebidos} T={T}/>
       </>)}
 
       {/* ═══ VISTA: RESUMO (patrimônio total + médias) ═══ */}
@@ -1193,6 +1389,201 @@ function TelaCarteira({ ativos, onClose, onEditar, T }) {
         )}
         {/* PROVENTOS */}
         {tab==="proventos" && <div style={{ marginTop:4 }}><ProjecaoProventos ativos={ativos} T={T}/></div>}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// TELA DEDICADA — RESERVA PLUS (Tesouro Direto + CDB/LCI + ETFs globais)
+// ════════════════════════════════════════════════════════════════════════════
+function TelaReservaPlus({ ativos, onClose, T }) {
+  const ehGlobal = (a) => ETFS_GLOBAIS.includes(a.ticker);
+  const ehTesouro = (a) => a.cat==="Tesouro" || /tesouro/i.test(String(a.nome));
+  const ehRendaFixa = (a) => /cdb|lci|lca|rdb|cra|cri/i.test(String(a.nome)+a.ticker);
+  const ehReserva = (a) => ehTesouro(a) || ehGlobal(a) || ehRendaFixa(a);
+
+  const itens = ativos.filter(a=>a.qtd>0 && ehReserva(a)).map(a=>({
+    ...a, valor:+(a.qtd*a.cotacao).toFixed(2), custo:+(a.qtd*a.precoMedio).toFixed(2),
+    classe: ehTesouro(a)?"Tesouro Direto":ehGlobal(a)?"Internacional (ETF)":"Renda Fixa",
+  }));
+  const total = itens.reduce((s,a)=>s+a.valor,0);
+  const custoTotal = itens.reduce((s,a)=>s+a.custo,0);
+  const ganho = total - custoTotal;
+  const ganhoPct = custoTotal>0 ? ganho/custoTotal*100 : 0;
+  const patrimonio = ativos.filter(a=>a.qtd>0).reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  const pctPatrimonio = patrimonio>0 ? total/patrimonio*100 : 0;
+  const alvo = Math.max(patrimonio*0.25, 1000);
+  const pctAlvo = Math.min(total/alvo*100, 100);
+
+  const CLASSES = ["Tesouro Direto","Internacional (ETF)","Renda Fixa"];
+  const CORES = { "Tesouro Direto":T.green, "Internacional (ETF)":T.cyan, "Renda Fixa":T.amber };
+  const ICONES = { "Tesouro Direto":"🏛️", "Internacional (ETF)":"🌎", "Renda Fixa":"🔒" };
+  const porClasse = CLASSES.map(cl=>{
+    const its = itens.filter(a=>a.classe===cl);
+    return { classe:cl, valor:its.reduce((s,a)=>s+a.valor,0), n:its.length };
+  }).filter(c=>c.valor>0);
+
+  return (
+    <div className="modal-fullscreen" style={{ position:"fixed", inset:0, background:T.bg, zIndex:1300, overflowY:"auto", color:T.text, paddingBottom:48 }}>
+      {/* header */}
+      <div style={{ background:T.bgHeader, padding:"22px 18px 18px", borderBottom:`1px solid ${T.border}`, position:"relative" }}>
+        <button onClick={onClose} style={{ position:"absolute", top:16, right:16, width:34, height:34, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:16 }}>✕</button>
+        <div style={{ fontSize:11, color:T.textMute, letterSpacing:2, textTransform:"uppercase", marginBottom:4 }}>🌍 Reserva Plus</div>
+        <div style={{ fontSize:30, fontWeight:800, color:T.text, letterSpacing:-1 }}>{fmt(total)}</div>
+        <div style={{ fontSize:12, color:T.textFaint, marginTop:4 }}>{pctPatrimonio.toFixed(1)}% do seu patrimônio · exposição internacional + renda fixa</div>
+        {/* progresso do alvo */}
+        <div style={{ marginTop:12 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.textMute, marginBottom:4 }}>
+            <span>Alvo de reserva (25% do patrimônio)</span><span style={{ fontWeight:700 }}>{pctAlvo.toFixed(0)}%</span>
+          </div>
+          <div style={{ height:8, background:T.cardAlt, borderRadius:5, overflow:"hidden" }}>
+            <div style={{ height:"100%", width:`${pctAlvo}%`, background:T.green, borderRadius:5, transition:"width 0.5s" }}/>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding:"16px" }}>
+        {itens.length===0 ? (
+          <div style={{ textAlign:"center", padding:"40px 20px", color:T.textMute }}>
+            <div style={{ fontSize:40, marginBottom:10 }}>🌍</div>
+            <div style={{ fontSize:13, marginBottom:6 }}>Você ainda não tem títulos de reserva.</div>
+            <div style={{ fontSize:11, color:T.textFaint }}>A Reserva Plus reúne Tesouro Direto, CDB/LCI/LCA e ETFs globais (BOVA11 não conta — é Brasil). Esses ativos dão segurança e exposição internacional à carteira.</div>
+          </div>
+        ) : (<>
+          {/* resumo: ganho/rentabilidade */}
+          <div style={{ display:"flex", gap:10, marginBottom:16 }}>
+            <div style={{ flex:1, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px 14px" }}>
+              <div style={{ fontSize:10, color:T.textFaint, marginBottom:3 }}>Investido</div>
+              <div style={{ fontSize:16, fontWeight:800, color:T.text }}>{fmt(custoTotal)}</div>
+            </div>
+            <div style={{ flex:1, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px 14px" }}>
+              <div style={{ fontSize:10, color:T.textFaint, marginBottom:3 }}>Rendimento</div>
+              <div style={{ fontSize:16, fontWeight:800, color: ganho>=0?T.green:T.red }}>{ganho>=0?"+":""}{fmt(ganho)}</div>
+              <div style={{ fontSize:10, color: ganho>=0?T.green:T.red }}>{ganho>=0?"▲":"▼"} {Math.abs(ganhoPct).toFixed(2)}%</div>
+            </div>
+          </div>
+
+          {/* composição por classe */}
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"14px", marginBottom:16 }}>
+            <div style={{ fontSize:11, color:T.textFaint, marginBottom:10, textTransform:"uppercase", letterSpacing:1 }}>Composição</div>
+            <div style={{ display:"flex", height:10, borderRadius:6, overflow:"hidden", gap:2, marginBottom:12 }}>
+              {porClasse.map(c=><div key={c.classe} style={{ flex:c.valor, background:CORES[c.classe] }}/>)}
+            </div>
+            {porClasse.map(c=>(
+              <div key={c.classe} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:7 }}>
+                <span style={{ fontSize:12, color:T.textDim }}>{ICONES[c.classe]} {c.classe} <span style={{ fontSize:10, color:T.textFaint }}>· {c.n}</span></span>
+                <span style={{ fontSize:12, fontWeight:700, color:CORES[c.classe] }}>{fmt(c.valor)} <span style={{ fontSize:10, color:T.textFaint }}>({(c.valor/total*100).toFixed(0)}%)</span></span>
+              </div>
+            ))}
+          </div>
+
+          {/* lista de títulos */}
+          <div style={{ fontSize:11, color:T.textFaint, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>Títulos ({itens.length})</div>
+          {itens.sort((a,b)=>b.valor-a.valor).map(a=>{
+            const g = a.valor-a.custo; const gp = a.custo>0?g/a.custo*100:0;
+            return (
+              <div key={a.ticker} onClick={()=>abrirEditorAtivo(a.ticker)} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"12px 14px", marginBottom:8, cursor:"pointer" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:T.text }}>{ICONES[a.classe]} {a.nome}</div>
+                    <div style={{ fontSize:10, color:T.textFaint, marginTop:2 }}>{a.classe} · {a.qtd<1?a.qtd.toFixed(2):a.qtd} cotas · PM {fmt(a.precoMedio)}</div>
+                  </div>
+                  <div style={{ textAlign:"right", flexShrink:0 }}>
+                    <div style={{ fontSize:14, fontWeight:800, color:T.text }}>{fmt(a.valor)}</div>
+                    <div style={{ fontSize:10, color: g>=0?T.green:T.red }}>{g>=0?"+":""}{fmt(g)} ({gp.toFixed(1)}%)</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize:9, color:T.textFaint, marginTop:10, textAlign:"center", lineHeight:1.5 }}>
+            💡 Toque num título para editar. A Reserva Plus ajuda a medir sua proteção (renda fixa) e exposição internacional (ETFs globais).
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PREVISTO vs REALIZADO — compara o provento previsto com o recebido de fato
+// "Realizado" vem das linhas de Rendimento/Dividendo/JCP da planilha da B3.
+// ════════════════════════════════════════════════════════════════════════════
+function PrevistoVsRealizado({ ativos, proventosRecebidos, T }) {
+  const ano = new Date().getFullYear();
+  const mesAtual = new Date().getMonth(); // 0-11
+  const NOMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+  const previstoChart = buildChart(ativos, "TUDO");
+  const realizadoPorMes = proventosRecebidos?.porMes || {};
+  const temRealizado = Object.keys(realizadoPorMes).some(k=>k.startsWith(String(ano)));
+
+  const dados = NOMES.map((nome,i)=>{
+    const mesKey = `${ano}-${String(i+1).padStart(2,"0")}`;
+    return { mes:nome, previsto:+(previstoChart[i]?._total||0).toFixed(2), realizado:+(realizadoPorMes[mesKey]||0).toFixed(2), passou:i<=mesAtual };
+  });
+  const totalPrevistoAno = dados.reduce((s,d)=>s+d.previsto,0);
+  const totalRealizadoAno = Object.entries(realizadoPorMes).filter(([k])=>k.startsWith(String(ano))).reduce((s,[,v])=>s+v,0);
+  const previstoAteAgora = dados.filter(d=>d.passou).reduce((s,d)=>s+d.previsto,0);
+  const aderencia = previstoAteAgora>0 ? totalRealizadoAno/previstoAteAgora*100 : 0;
+
+  if (!temRealizado) {
+    return (
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:18 }}>
+        <div style={{ fontSize:13, fontWeight:800, color:T.text, marginBottom:6 }}>📊 Previsto vs Realizado</div>
+        <div style={{ fontSize:11, color:T.textMute, lineHeight:1.5 }}>
+          Para ver quanto você <strong>realmente recebeu</strong> de proventos vs o previsto, importe a planilha de Movimentação da B3 (ela tem as linhas de Rendimento/Dividendo/JCP). Vá em <strong>Importar em massa → Arquivo da B3</strong>.
+        </div>
+        <div style={{ marginTop:10, padding:"10px 12px", background:T.accentBg, borderRadius:10, fontSize:11, color:T.accentSoft }}>
+          Previsto para {ano}: <strong>{fmt(totalPrevistoAno)}</strong> ({fmt(totalPrevistoAno/12)}/mês em média)
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:18 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
+        <span style={{ fontSize:13, fontWeight:800, color:T.text }}>📊 Previsto vs Realizado · {ano}</span>
+      </div>
+      <div style={{ fontSize:10, color:T.textFaint, marginBottom:12 }}>Realizado = proventos recebidos de fato (da planilha B3)</div>
+
+      {/* resumo */}
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        <div style={{ flex:1, background:T.cardAlt, borderRadius:10, padding:"10px 11px" }}>
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:2 }}>Recebido no ano</div>
+          <div style={{ fontSize:15, fontWeight:800, color:T.green }}>{fmt(totalRealizadoAno)}</div>
+        </div>
+        <div style={{ flex:1, background:T.cardAlt, borderRadius:10, padding:"10px 11px" }}>
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:2 }}>Previsto até agora</div>
+          <div style={{ fontSize:15, fontWeight:800, color:T.accentSoft }}>{fmt(previstoAteAgora)}</div>
+        </div>
+        <div style={{ flex:1, background:T.cardAlt, borderRadius:10, padding:"10px 11px" }}>
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:2 }}>Aderência</div>
+          <div style={{ fontSize:15, fontWeight:800, color: aderencia>=95?T.green:aderencia>=80?T.amber:T.red }}>{aderencia.toFixed(0)}%</div>
+        </div>
+      </div>
+
+      {/* gráfico agrupado */}
+      <div style={{ height:180 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={dados} margin={{ top:4, right:4, left:0, bottom:0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
+            <XAxis dataKey="mes" tick={{ fontSize:9, fill:T.textFaint }} axisLine={false} tickLine={false}/>
+            <YAxis tick={{ fontSize:9, fill:T.textFaint }} axisLine={false} tickLine={false} width={38} tickFormatter={v=>v>=1000?(v/1000).toFixed(0)+"k":v}/>
+            <Tooltip
+              contentStyle={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:8, fontSize:11 }}
+              labelStyle={{ color:T.text }}
+              formatter={(v,n)=>[fmt(v), n==="previsto"?"Previsto":"Realizado"]}
+            />
+            <Legend wrapperStyle={{ fontSize:10 }} formatter={(v)=>v==="previsto"?"Previsto":"Realizado"}/>
+            <Bar dataKey="previsto" fill={T.accentSoft} radius={[3,3,0,0]} maxBarSize={14}/>
+            <Bar dataKey="realizado" fill={T.green} radius={[3,3,0,0]} maxBarSize={14}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div style={{ fontSize:9, color:T.textFaint, marginTop:8, textAlign:"center" }}>
+        Meses futuros mostram só o previsto · o realizado aparece conforme os proventos caem
       </div>
     </div>
   );
@@ -1686,11 +2077,12 @@ function Assistente({ ativos, setAtivos, T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // IMPORTAR EM MASSA — cola texto e atualiza/cria ativos de uma vez
 // ════════════════════════════════════════════════════════════════════════════
-function ImportarMassa({ ativos, setAtivos, onClose, T }) {
+function ImportarMassa({ ativos, setAtivos, onProventosRecebidos, onClose, T }) {
   const [modo, setModo] = useState("texto"); // "texto" | "arquivo"
   const fileRef = useRef(null);
   const [texto, setTexto] = useState("");
   const [itensArquivo, setItensArquivo] = useState(null);
+  const [proventosArquivo, setProventosArquivo] = useState(null); // {porMes, total, registros}
   const [infoArquivo, setInfoArquivo] = useState(null); // {nome, lidas, ignoradas}
   const [erroArquivo, setErroArquivo] = useState(null);
   const [lendo, setLendo] = useState(false);
@@ -1722,6 +2114,10 @@ function ImportarMassa({ ativos, setAtivos, onClose, T }) {
           setItensArquivo(its);
           setInfoArquivo({ nome:file.name, aba:nomeAba, lidas, ignoradas, total:its.length });
           registrarLog("import", `Planilha lida: ${its.length} ativos (${lidas} movimentos)`, { direcao:"interno", origem:"app", detalhe:its.map(i=>`${i.ticker}=${i.qtd}`).join(", ") });
+          // proventos realmente recebidos (Rendimento/Dividendo/JCP) por mês
+          const prov = parseProventosRecebidos(linhas);
+          setProventosArquivo(prov);
+          if (prov.total>0) registrarLog("import", `Proventos recebidos lidos: ${fmt(prov.total)} em ${Object.keys(prov.porMes).length} meses`, { direcao:"interno", origem:"app" });
         }
       } catch (err) {
         setErroArquivo("Erro ao ler o arquivo: " + err.message);
@@ -1741,6 +2137,9 @@ function ImportarMassa({ ativos, setAtivos, onClose, T }) {
           if (i.qtd!=null) mapa[i.ticker].qtd = i.qtd;
           if (i.precoMedio!=null) mapa[i.ticker].precoMedio = i.precoMedio;
           if (i.cotacao!=null) mapa[i.ticker].cotacao = i.cotacao;
+          if (i.dataCompra) mapa[i.ticker].dataCompra = i.dataCompra;
+          if (i.ultimaCompra) mapa[i.ticker].ultimaCompra = i.ultimaCompra;
+          if (i.movimentacoes) mapa[i.ticker].movimentacoes = i.movimentacoes;
         } else {
           const ehTesouro = /^tesouro/i.test(i.ticker);
           const ehFII = /11$/.test(i.ticker) && !ehTesouro;
@@ -1751,11 +2150,15 @@ function ImportarMassa({ ativos, setAtivos, onClose, T }) {
             precoMedio:i.precoMedio||0, cotacao:i.cotacao||i.precoMedio||0,
             meses: ehFII?[1,2,3,4,5,6,7,8,9,10,11,12]:[],
             setor:"Outros",
+            dataCompra:i.dataCompra||null, ultimaCompra:i.ultimaCompra||null, movimentacoes:i.movimentacoes||[],
           };
         }
       });
       return Object.values(mapa);
     });
+    if (proventosArquivo && proventosArquivo.total>0 && onProventosRecebidos) {
+      onProventosRecebidos(proventosArquivo);
+    }
     onClose();
   };
 
@@ -2154,7 +2557,7 @@ function EditarAtivos({ ativos, setAtivos, bridgeUrl, T }) {
         }}>📋 Importar</button>
       </div>
 
-      {showImport && <ImportarMassa ativos={ativos} setAtivos={setAtivos} onClose={()=>setShowImport(false)} T={T}/>}
+      {showImport && <ImportarMassa ativos={ativos} setAtivos={setAtivos} onProventosRecebidos={(p)=>setProventosRecebidos(p)} onClose={()=>setShowImport(false)} T={T}/>}
 
       {/* Resumo topo */}
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:20 }}>
@@ -2904,7 +3307,7 @@ function gerarEstagios(metaMensal, nEstagios) {
   }));
 }
 
-function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, onAbrirAnalises, T }) {
+function TrilhaMetas({ valorAtual, metaMensal, compacto=false, onConfigurar, onAbrirAnalises, T }) {
   const [nivel, setNivel] = useState(0); // 0=base, 1=+500, 2=+1500
   const niveis = [{ lb:"Base", extra:0 }, { lb:"+R$500", extra:500 }, { lb:"+R$1.500", extra:1500 }];
   const metaEfetiva = metaMensal + niveis[nivel].extra;
@@ -2917,6 +3320,24 @@ function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, onAbrirAnalises, T 
   const faltaProximo = proximoEstagio ? proximoEstagio.valor - valorAtual : 0;
   const faltaMetaFinal = metaBatida ? 0 : metaEfetiva - valorAtual;
   const stop = (fn)=>(e)=>{ e.stopPropagation(); fn&&fn(); };
+
+  // modo compacto (carrossel minimizado) — uma linha só
+  if (compacto) {
+    return (
+      <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"11px 13px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🎯 Meta de proventos</span>
+        </div>
+        <div style={{ display:"flex", alignItems:"baseline", gap:5, marginTop:8 }}>
+          <span style={{ fontSize:15, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
+          <span style={{ fontSize:9, color:T.textFaint }}>/ {fmt(metaEfetiva)} · {pctGeral.toFixed(0)}%</span>
+        </div>
+        <div style={{ height:4, background:T.cardAlt, borderRadius:3, overflow:"hidden", marginTop:4 }}>
+          <div style={{ height:"100%", width:`${pctGeral}%`, background:metaBatida?T.green:T.accent, borderRadius:3 }}/>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"13px" }}>
@@ -3071,7 +3492,7 @@ function TrilhaMetas({ valorAtual, metaMensal, onConfigurar, onAbrirAnalises, T 
 // ════════════════════════════════════════════════════════════════════════════
 const ETFS_GLOBAIS = ["VWRA11","IVVB11","NASD11","XINA11","BNDX11","WRLD11"];
 
-function CarrosselMetas({ ativos, mediaMes, metaMensal, custoVida={}, onConfigurar, onAbrirAnalises, onAbrirContas, onAbrirReserva, T }) {
+function CarrosselMetas({ ativos, mediaMes, metaMensal, metaAporte=0, aporteEsteMes=0, custoVida={}, onConfigurar, onConfigAporte, onAbrirAnalises, onAbrirContas, onAbrirReserva, T }) {
   // ── CONTAS A PAGAR (dados reais da página Custo de Vida) ──
   const contasLista = CUSTOS_DEF.map(c=>({ ...c, valor:+custoVida[c.id]||0 })).filter(c=>c.valor>0).sort((a,b)=>a.valor-b.valor);
   const custoTotal = contasLista.reduce((s,c)=>s+c.valor,0);
@@ -3087,33 +3508,52 @@ function CarrosselMetas({ ativos, mediaMes, metaMensal, custoVida={}, onConfigur
   const reservaAlvo = Math.max(patrimonio*0.25, 1000);
   const reservaPct = Math.min(reservaValor/reservaAlvo*100, 100);
 
+  const [aberto, setAberto] = useState(true);
   const stop = (fn) => (e)=>{ e.stopPropagation(); fn&&fn(); };
   const Barra = ({ pct, cor }) => (
     <div style={{ height:8, background:T.cardAlt, borderRadius:5, overflow:"hidden", marginTop:8 }}>
       <div style={{ height:"100%", width:`${pct}%`, background:cor, borderRadius:5, transition:"width 0.4s ease" }}/>
     </div>
   );
+  const MiniBarra = ({ pct, cor }) => (
+    <div style={{ height:4, background:T.cardAlt, borderRadius:3, overflow:"hidden", marginTop:4 }}>
+      <div style={{ height:"100%", width:`${pct}%`, background:cor, borderRadius:3 }}/>
+    </div>
+  );
   const painelStyle = { flex:"0 0 88%", scrollSnapAlign:"center", background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px", cursor:"pointer" };
+  const painelMini = { flex:"0 0 70%", scrollSnapAlign:"center", background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"11px 13px", cursor:"pointer" };
   const btnVer = (fn) => (
     <button onClick={stop(fn)} style={{ fontSize:9, fontWeight:700, color:T.accentSoft, background:T.accentBg, border:`1px solid ${T.accentBorder}55`, borderRadius:7, padding:"4px 9px", cursor:"pointer" }}>ver detalhe ›</button>
   );
 
   return (
     <div style={{ marginTop:12 }}>
-      <div style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:8 }}>🎯 Minhas metas · deslize ›</div>
+      {/* cabeçalho com setinha de minimizar/expandir (controla os 3 painéis) */}
+      <div onClick={()=>setAberto(v=>!v)} style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8, cursor:"pointer" }}>
+        <span style={{ fontSize:11, color:T.textFaint, transform:aberto?"rotate(90deg)":"none", transition:"transform 0.3s ease", display:"inline-block" }}>▶</span>
+        <span style={{ fontSize:11, color:T.textMute, fontWeight:600 }}>🎯 Minhas metas {aberto ? "· deslize ›" : "· toque para expandir"}</span>
+      </div>
       <div style={{ display:"flex", gap:12, overflowX:"auto", paddingBottom:6, scrollSnapType:"x mandatory" }}>
 
         {/* PAINEL 1 — META DE PROVENTOS (timeline detalhada + 3 níveis) */}
-        <div style={{ flex:"0 0 88%", scrollSnapAlign:"center" }}>
-          <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} onConfigurar={onConfigurar} onAbrirAnalises={onAbrirAnalises} T={T} />
+        <div style={{ flex: aberto?"0 0 88%":"0 0 70%", scrollSnapAlign:"center" }}>
+          <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} compacto={!aberto} onConfigurar={onConfigurar} onAbrirAnalises={onAbrirAnalises} T={T} />
         </div>
 
         {/* PAINEL 2 — CONTAS PAGAS (dados reais da página Custo de Vida) */}
-        <div style={painelStyle} onClick={onAbrirContas}>
+        <div style={aberto?painelStyle:painelMini} onClick={onAbrirContas}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🧾 Contas pagas</span>{btnVer(onAbrirContas)}
+            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🧾 Contas pagas</span>{aberto && btnVer(onAbrirContas)}
           </div>
-          {custoTotal>0 ? (<>
+          {!aberto ? (
+            <div style={{ marginTop:8 }}>
+              <div style={{ display:"flex", alignItems:"baseline", gap:5 }}>
+                <span style={{ fontSize:15, fontWeight:800, color:contasPct>=100?T.green:T.cyan }}>{contasPagas}/{marcos.length}</span>
+                <span style={{ fontSize:9, color:T.textFaint }}>contas · {contasPct.toFixed(0)}%</span>
+              </div>
+              <MiniBarra pct={contasPct} cor={contasPct>=100?T.green:T.cyan}/>
+            </div>
+          ) : custoTotal>0 ? (<>
             <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:12 }}>
               <span style={{ fontSize:26, fontWeight:800, color: contasPct>=100?T.green:T.cyan }}>{contasPagas}<span style={{ fontSize:15, color:T.textFaint }}>/{marcos.length}</span></span>
               <span style={{ fontSize:11, color:T.textFaint }}>contas pagas pelos proventos</span>
@@ -3152,10 +3592,19 @@ function CarrosselMetas({ ativos, mediaMes, metaMensal, custoVida={}, onConfigur
         </div>
 
         {/* PAINEL 3 — RESERVA PLUS (Tesouro + CDB/LCI + ETFs globais) */}
-        <div style={painelStyle} onClick={onAbrirReserva}>
+        <div style={aberto?painelStyle:painelMini} onClick={onAbrirReserva}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🌍 Reserva Plus</span>{btnVer(onAbrirReserva)}
+            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🌍 Reserva Plus</span>{aberto && btnVer(onAbrirReserva)}
           </div>
+          {!aberto ? (
+            <div style={{ marginTop:8 }}>
+              <div style={{ display:"flex", alignItems:"baseline", gap:5 }}>
+                <span style={{ fontSize:15, fontWeight:800, color:T.amber }}>{fmt(reservaValor)}</span>
+                <span style={{ fontSize:9, color:T.textFaint }}>{reservaPct.toFixed(0)}% do alvo</span>
+              </div>
+              <MiniBarra pct={reservaPct} cor={T.amber}/>
+            </div>
+          ) : (<>
           <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:12 }}>
             <span style={{ fontSize:26, fontWeight:800, color:T.amber }}>{fmt(reservaValor)}</span>
             <span style={{ fontSize:11, color:T.textFaint }}>/ {fmt(reservaAlvo)}</span>
@@ -3174,6 +3623,39 @@ function CarrosselMetas({ ativos, mediaMes, metaMensal, custoVida={}, onConfigur
             </div>
           ) : (
             <div style={{ fontSize:9, color:T.textFaint, marginTop:10 }}>Sem títulos de reserva ainda (Tesouro, CDB, ETFs globais).</div>
+          )}
+          </>)}
+        </div>
+
+        {/* PAINEL 4 — APORTE MENSAL (quanto investir/mês; realizado vem das compras B3) */}
+        <div style={aberto?painelStyle:painelMini} onClick={onConfigAporte}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span style={{ fontSize:13, fontWeight:800, color:T.text }}>💵 Aporte mensal</span>
+            {aberto && <button onClick={stop(onConfigAporte)} style={{ fontSize:9, fontWeight:700, color:T.cyan, background:`${T.cyan}1c`, border:`1px solid ${T.cyan}55`, borderRadius:7, padding:"4px 9px", cursor:"pointer" }}>definir ›</button>}
+          </div>
+          {!aberto ? (
+            <div style={{ marginTop:8 }}>
+              <div style={{ display:"flex", alignItems:"baseline", gap:5 }}>
+                <span style={{ fontSize:15, fontWeight:800, color:T.cyan }}>{fmt(aporteEsteMes)}</span>
+                <span style={{ fontSize:9, color:T.textFaint }}>{metaAporte>0?`${Math.min(aporteEsteMes/metaAporte*100,100).toFixed(0)}%`:"sem meta"}</span>
+              </div>
+              <MiniBarra pct={metaAporte>0?Math.min(aporteEsteMes/metaAporte*100,100):0} cor={T.cyan}/>
+            </div>
+          ) : metaAporte>0 ? (<>
+            <div style={{ fontSize:10, color:T.textMute, marginTop:8 }}>Quanto você já investiu este mês (compras da B3)</div>
+            <div style={{ display:"flex", alignItems:"baseline", gap:6, marginTop:10 }}>
+              <span style={{ fontSize:26, fontWeight:800, color: aporteEsteMes>=metaAporte?T.green:T.cyan }}>{fmt(aporteEsteMes)}</span>
+              <span style={{ fontSize:11, color:T.textFaint }}>/ {fmt(metaAporte)}/mês</span>
+            </div>
+            <Barra pct={Math.min(aporteEsteMes/metaAporte*100,100)} cor={aporteEsteMes>=metaAporte?T.green:T.cyan}/>
+            <div style={{ fontSize:9, color: aporteEsteMes>=metaAporte?T.green:T.textMute, marginTop:8, fontWeight:600 }}>
+              {aporteEsteMes>=metaAporte ? "✓ meta de aporte batida este mês!" : `faltam ${fmt(metaAporte-aporteEsteMes)} para a meta do mês`}
+            </div>
+          </>) : (
+            <div style={{ marginTop:14, textAlign:"center" }}>
+              <div style={{ fontSize:11, color:T.textMute, marginBottom:8 }}>Defina quanto pretende investir por mês e acompanhe seus aportes.</div>
+              <span style={{ fontSize:10, fontWeight:700, color:T.cyan }}>Toque para definir →</span>
+            </div>
           )}
         </div>
 
@@ -3265,6 +3747,46 @@ function ModalMeta({ metaMensal, setMetaMensal, valorAtual, onClose, T }) {
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// MODAL — meta de APORTE mensal (quanto pretendo investir por mês)
+// ════════════════════════════════════════════════════════════════════════════
+function ModalAporte({ metaAporte, setMetaAporte, aporteEsteMes, onClose, T }) {
+  const [valor, setValor] = useState(metaAporte || 0);
+  const sugestoes = [200, 500, 1000, 2000, 5000];
+  const pct = valor>0 ? Math.min(aporteEsteMes/valor*100, 100) : 0;
+  return (
+    <div onClick={onClose} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000a", zIndex:1000, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"20px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:440, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <div style={{ fontSize:18, fontWeight:800, color:T.text }}>💵 Meta de aporte mensal</div>
+          <button onClick={onClose} style={{ width:34, height:34, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:16 }}>✕</button>
+        </div>
+        <div style={{ fontSize:11, color:T.textMute, marginBottom:6 }}>Quanto você pretende investir/aportar por mês (R$)</div>
+        <input type="number" min="0" value={valor} onChange={e=>setValor(Math.max(0, +e.target.value))}
+          style={{ width:"100%", background:T.cardAlt, border:`2px solid ${T.cyan}`, borderRadius:10, color:T.text, padding:"12px 14px", fontSize:22, fontWeight:800, textAlign:"center", marginBottom:16 }} />
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:18 }}>
+          {sugestoes.map(s=>(
+            <button key={s} onClick={()=>setValor(s)} style={{ flex:"1 1 0", padding:"7px 4px", borderRadius:8, border:"none", cursor:"pointer", fontSize:11, fontWeight:700, background: valor===s ? T.cyan : T.border, color: valor===s ? "#fff" : T.textMute }}>{fmtK(s)}</button>
+          ))}
+        </div>
+        <div style={{ background:T.cardAlt, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 12px", marginBottom:16 }}>
+          <div style={{ fontSize:10, color:T.textFaint }}>Aportado este mês (das compras da planilha B3)</div>
+          <div style={{ display:"flex", alignItems:"baseline", gap:6 }}>
+            <span style={{ fontSize:15, fontWeight:800, color:T.cyan }}>{fmt(aporteEsteMes)}</span>
+            <span style={{ fontSize:11, color: aporteEsteMes>=valor&&valor>0 ? T.green : T.amber, fontWeight:700 }}>{valor>0 ? `${pct.toFixed(0)}% da meta` : ""}</span>
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={onClose} style={{ flex:"1 1 0", padding:"12px", borderRadius:10, border:`1px solid ${T.borderSoft}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:13, fontWeight:600 }}>Cancelar</button>
+          <button onClick={()=>{ setMetaAporte(valor||0); onClose(); }} style={{ flex:"1 1 0", padding:"12px", borderRadius:10, border:"none", background:T.cyan, color:"#fff", cursor:"pointer", fontSize:13, fontWeight:700 }}>✓ Salvar</button>
+        </div>
+        <div style={{ marginTop:12, fontSize:10, color:T.textFaint, textAlign:"center", lineHeight:1.6 }}>
+          O "aportado este mês" é calculado pelas suas compras registradas na planilha da B3. Reimporte a planilha para manter atualizado.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // ABA CUSTO DE VIDA — gastos fixos + marcos de provento/mês necessário
@@ -3516,7 +4038,7 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
 // ════════════════════════════════════════════════════════════════════════════
 // CHATBOT — assistente conectado à IA local (via AI Bridge na rede Tailscale)
 // ════════════════════════════════════════════════════════════════════════════
-function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
+function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, T }) {
   const [mensagens, setMensagens] = useState([]);
   const [input, setInput] = useState("");
   const [carregando, setCarregando] = useState(false);
@@ -3553,37 +4075,127 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
     const texto = input.trim();
     if (!texto || carregando) return;
     setInput("");
-    const novas = [...mensagens, { role:"user", content:texto }];
-    setMensagens(novas);
+    const baseHist = mensagens.slice(-8);
+    setMensagens(m=>[...m, { role:"user", content:texto }]);
     setCarregando(true);
     const carteira = resumoCarteira();
     registrarLog("chat", `Pergunta enviada: "${texto.slice(0,60)}"`, { direcao:"ida", origem:"servidor", detalhe:{ contextoEnviado:{ totalPatrimonio:carteira.totalPatrimonio, proventoAnual:carteira.proventoAnual, qtdAtivos:carteira.ativos.length } } });
+    const corpo = JSON.stringify({ mensagem: texto, historico: baseHist, carteira });
+    const inicio = Date.now();
+
+    // separa o raciocínio [[THINK]]...[[/THINK]] do texto da resposta
+    const parseThink = (raw) => {
+      let reasoning = "", content = raw;
+      const ini = raw.indexOf("[[THINK]]");
+      if (ini !== -1) {
+        const fim = raw.indexOf("[[/THINK]]");
+        if (fim !== -1) {
+          reasoning = raw.slice(ini+9, fim);
+          content = raw.slice(0, ini) + raw.slice(fim+10);
+        } else {
+          reasoning = raw.slice(ini+9); // ainda gerando o raciocínio
+          content = raw.slice(0, ini);
+        }
+      }
+      return { reasoning: reasoning.trim(), content: content.trim() };
+    };
+
+    // atualiza (ou cria) a última mensagem do assistente em streaming
+    const atualizarAssist = (raw) => setMensagens(m=>{
+      const { reasoning, content } = parseThink(raw);
+      const copy=[...m]; const last=copy[copy.length-1];
+      if (last && last.role==="assistant" && last.streaming) copy[copy.length-1]={ ...last, content, reasoning, streaming:true };
+      else copy.push({ role:"assistant", content, reasoning, streaming:true });
+      return copy;
+    });
+    const finalizarAssist = (raw, erro=false) => setMensagens(m=>{
+      const { reasoning, content } = erro ? { reasoning:"", content:raw } : parseThink(raw);
+      const copy=[...m]; const last=copy[copy.length-1];
+      const msg = { role:"assistant", content: content || (erro?raw:""), reasoning, erro };
+      if (last && last.role==="assistant" && last.streaming) copy[copy.length-1]=msg;
+      else copy.push(msg);
+      return copy;
+    });
+
+    // 1) tenta STREAMING (/chat/stream) — resposta em tempo real
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), 120000);
+      const r = await fetch(`${bridgeUrl}/chat/stream`, {
+        method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal, body: corpo,
+      });
+      if (!r.ok || !r.body) throw new Error("stream indisponível ("+r.status+")");
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let acc = "";
+      setMensagens(m=>[...m, { role:"assistant", content:"", streaming:true }]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        let pedaco = dec.decode(value, { stream:true });
+        // limpa prefixos SSE "data:" se o servidor usar esse formato
+        if (/^data:/m.test(pedaco)) {
+          pedaco = pedaco.split(/\r?\n/).map(l=>l.replace(/^data:\s?/,"")).filter(l=>l && l!=="[DONE]").join("");
+        }
+        acc += pedaco;
+        atualizarAssist(acc);
+      }
+      clearTimeout(t);
+      finalizarAssist(acc || "(sem resposta)");
+      setStatusPC("online");
+      registrarLog("chat", `Resposta (stream) em ${Date.now()-inicio}ms`, { direcao:"volta", origem:"servidor", detalhe:(acc||"").slice(0,200) });
+      setCarregando(false);
+      return;
+    } catch (eStream) {
+      registrarLog("sistema", `Stream indisponível, usando /chat: ${eStream.message}`, { direcao:"interno", origem:"app" });
+    }
+
+    // 2) fallback: /chat normal (resposta de uma vez)
     try {
       const ctrl = new AbortController();
       const t = setTimeout(()=>ctrl.abort(), 60000);
-      const inicio = Date.now();
       const r = await fetch(`${bridgeUrl}/chat`, {
-        method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal,
-        body: JSON.stringify({
-          mensagem: texto,
-          historico: mensagens.slice(-8), // últimas mensagens p/ contexto
-          carteira,
-        }),
+        method:"POST", headers:{ "Content-Type":"application/json" }, signal: ctrl.signal, body: corpo,
       });
       clearTimeout(t);
       const data = await r.json();
       const resposta = data?.resposta || data?.erro || "(sem resposta)";
       registrarLog("chat", `Resposta recebida em ${Date.now()-inicio}ms`, { direcao:"volta", origem:"servidor", detalhe:resposta.slice(0,200) });
-      setMensagens(m=>[...m, { role:"assistant", content:resposta }]);
+      finalizarAssist(resposta);
+      setStatusPC("online");
     } catch (e) {
       registrarLog("erro", `Chat falhou: ${e.message}`, { direcao:"volta", origem:"servidor" });
-      setMensagens(m=>[...m, { role:"assistant", content:"⚠️ Não consegui falar com o servidor. Verifique se o PC está ligado, o AI Bridge rodando e o Tailscale conectado.", erro:true }]);
+      finalizarAssist("⚠️ Não consegui falar com o servidor. Verifique se o PC está ligado, o AI Bridge rodando e o Tailscale conectado.", true);
       setStatusPC("offline");
     } finally { setCarregando(false); }
   };
 
   // detecta se a resposta tem linhas tipo "BBAS3 291 20,55" para aplicar na carteira
-  const detectarEdicoes = (txt) => parseImportacao(txt).filter(i=>!i.erro && i.qtd!=null);
+  // detecta edições na resposta da IA: linhas "TICKER QTD PM" OU bloco JSON [{ticker,qtd,...}]
+  const detectarEdicoes = (txt) => {
+    const doTexto = parseImportacao(txt).filter(i=>!i.erro && i.qtd!=null);
+    const porTicker = {}; doTexto.forEach(i=>porTicker[i.ticker]=i);
+    // tenta achar um array JSON com objetos {ticker, qtd, ...}
+    try {
+      const blocos = txt.match(/\[\s*\{[\s\S]*?\}\s*\]/g) || [];
+      blocos.forEach(b=>{
+        const arr = JSON.parse(b);
+        if (Array.isArray(arr)) arr.forEach(o=>{
+          if (o && o.ticker) {
+            const tk = String(o.ticker).toUpperCase();
+            porTicker[tk] = {
+              ticker: tk,
+              qtd: o.qtd!=null?+o.qtd:(porTicker[tk]?.qtd ?? null),
+              precoMedio: o.precoMedio!=null?+o.precoMedio:(o.pm!=null?+o.pm:(porTicker[tk]?.precoMedio ?? null)),
+              cotacao: o.cotacao!=null?+o.cotacao:(porTicker[tk]?.cotacao ?? null),
+              prov: o.prov!=null?+o.prov:(o.provMes!=null?+o.provMes:null),
+            };
+          }
+        });
+      });
+    } catch(e) { /* JSON inválido — ignora, usa só o texto */ }
+    return Object.values(porTicker);
+  };
 
   const sugestoes = [
     "Resuma minha carteira",
@@ -3599,7 +4211,7 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
           <span style={{ width:9, height:9, borderRadius:"50%", background: statusPC==="online"?T.green:statusPC==="offline"?T.red:T.amber, boxShadow:`0 0 8px ${statusPC==="online"?T.green:statusPC==="offline"?T.red:T.amber}` }}/>
           <span style={{ fontSize:12, fontWeight:700, color:T.text }}>
-            {statusPC==="online"?"IA conectada":statusPC==="offline"?"Servidor offline":"Verificando..."}
+            {statusPC==="online"?(servidorNome?`IA conectada · ${servidorNome}`:"IA conectada"):statusPC==="offline"?"Servidor offline":"Verificando..."}
           </span>
         </div>
         <span style={{ fontSize:9, color:T.textFaint }}>🔒 IA local · privada</span>
@@ -3628,17 +4240,37 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, T }) {
         ) : (
           mensagens.map((m,i)=>{
             const eu = m.role==="user";
-            const edicoes = !eu && !m.erro ? detectarEdicoes(m.content) : [];
+            const edicoes = !eu && !m.erro && !m.streaming ? detectarEdicoes(m.content) : [];
             return (
               <div key={i} style={{ display:"flex", justifyContent:eu?"flex-end":"flex-start", marginBottom:10 }}>
                 <div style={{ maxWidth:"85%", background: eu?T.accent:(m.erro?`${T.red}14`:T.card), border:`1px solid ${eu?T.accent:(m.erro?T.red+"44":T.border)}`, borderRadius:14, padding:"10px 13px" }}>
-                  <div style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap" }}>{m.content}</div>
+                  {/* raciocínio do modelo (DeepSeek R1) — em cinza, recolhível */}
+                  {!eu && m.reasoning && (
+                    <details open={m.streaming && !m.content} style={{ marginBottom: m.content?8:0 }}>
+                      <summary style={{ fontSize:10, color:T.textFaint, cursor:"pointer", userSelect:"none", listStyle:"none" }}>
+                        💭 {m.streaming && !m.content ? "pensando..." : "raciocínio"} {m.streaming && !m.content && <span className="cursor-pisca">▋</span>}
+                      </summary>
+                      <div style={{ fontSize:11, color:T.textMute, lineHeight:1.5, whiteSpace:"pre-wrap", marginTop:5, paddingLeft:8, borderLeft:`2px solid ${T.border}`, fontStyle:"italic" }}>{m.reasoning}</div>
+                    </details>
+                  )}
+                  {m.content && <div style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap" }}>{m.content}{m.streaming && <span className="cursor-pisca">▋</span>}</div>}
                   {/* se o assistente sugeriu edições de ativos, oferece aplicar */}
                   {edicoes.length>0 && (
                     <button onClick={()=>{
+                      registrarLog("edicao", `IA aplicou ${edicoes.length} alteração(ões)`, { direcao:"interno", origem:"app", detalhe: edicoes.map(i=>`${i.ticker} qtd=${i.qtd} pm=${i.precoMedio}`).join("; ") });
                       setAtivos(prev=>{
                         const mapa={}; prev.forEach(a=>mapa[a.ticker]={...a});
-                        edicoes.forEach(i=>{ if(mapa[i.ticker]){ if(i.qtd!=null)mapa[i.ticker].qtd=i.qtd; if(i.precoMedio!=null)mapa[i.ticker].precoMedio=i.precoMedio; if(i.cotacao!=null)mapa[i.ticker].cotacao=i.cotacao; } });
+                        edicoes.forEach(i=>{
+                          if(mapa[i.ticker]){
+                            if(i.qtd!=null)mapa[i.ticker].qtd=i.qtd;
+                            if(i.precoMedio!=null)mapa[i.ticker].precoMedio=i.precoMedio;
+                            if(i.cotacao!=null)mapa[i.ticker].cotacao=i.cotacao;
+                            if(i.prov!=null)mapa[i.ticker].prov=i.prov;
+                          } else {
+                            const ehTesouro=/^tesouro/i.test(i.ticker); const ehFII=/11$/.test(i.ticker)&&!ehTesouro;
+                            mapa[i.ticker]={ ticker:i.ticker, nome:i.ticker, cat:ehTesouro?"Tesouro":(ehFII?"FII":"Ação"), freq:ehFII?"Mensal":"—", qtd:i.qtd||0, prov:i.prov||0, precoMedio:i.precoMedio||0, cotacao:i.cotacao||i.precoMedio||0, meses:ehFII?[1,2,3,4,5,6,7,8,9,10,11,12]:[], setor:"Outros" };
+                          }
+                        });
                         return Object.values(mapa);
                       });
                     }} style={{ marginTop:8, padding:"7px 11px", borderRadius:8, border:"none", background:T.green, color:"#06281b", cursor:"pointer", fontSize:11, fontWeight:700 }}>
@@ -3787,7 +4419,7 @@ function VisualizadorLogs({ onClose, T }) {
   );
 }
 
-function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onLimparDados, onExportar, onImportar, onClose }) {
+function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onLimparDados, onExportar, onImportar, onExportarPDF, onClose }) {
   const [showLogs, setShowLogs] = useState(false);
   const Secao = ({ titulo, children }) => (
     <div style={{ marginBottom:20 }}>
@@ -3935,6 +4567,14 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
           <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
             Exporta um arquivo com todos os seus dados (ativos, meta, custo de vida). Guarde-o para restaurar se trocar de aparelho ou reinstalar.
           </div>
+          {/* relatório PDF */}
+          <button onClick={onExportarPDF} style={{
+            width:"100%", padding:"11px", borderRadius:10, cursor:"pointer", marginBottom:8,
+            border:`1px solid ${T.accent}`, background:T.accent, color:"#fff", fontSize:12, fontWeight:700
+          }}>📄 Gerar relatório PDF da carteira</button>
+          <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
+            Cria um PDF com patrimônio, dividendos, composição por classe, lista de ativos e metas — pronto para guardar ou imprimir.
+          </div>
           <button onClick={onLimparDados} style={{
             width:"100%", padding:"10px", borderRadius:10, cursor:"pointer",
             border:`1px solid ${T.red}55`, background:`${T.red}12`, color:T.red, fontSize:12, fontWeight:600
@@ -3971,10 +4611,16 @@ export default function App() {
   const [mesSel, setMesSel] = useState(0);
   const [aba,    setAba]    = useState("painel");
   const [menuAberto, setMenuAberto] = useState(false);
+  // ao trocar de aba pelo menu, rola suavemente até o topo (centraliza o cabeçalho do tema)
+  useEffect(() => {
+    const t = setTimeout(() => { try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch(e){ window.scrollTo(0,0); } }, 40);
+    return () => clearTimeout(t);
+  }, [aba]);
 
   // ── CONFIGURAÇÕES (engrenagem) — todas salvas na memória ────────────────
   const [showConfig, setShowConfig] = useState(false);
   const [showCarteira, setShowCarteira] = useState(false);
+  const [showReserva, setShowReserva] = useState(false);
   const [editandoTicker, setEditandoTicker] = useState(undefined); // undefined=fechado, null=novo, string=editar
   useEffect(() => registrarEditorAtivo((tk)=>setEditandoTicker(tk)), []);
   const [layout,   setLayout]   = useEstadoSalvo("layout", "celular");  // "celular" | "tv"
@@ -3983,7 +4629,10 @@ export default function App() {
 
   // ── META DE PROVENTOS (trilha de progressão) — salva na memória ─────────
   const [metaMensal, setMetaMensal] = useEstadoSalvo("meta", 500);    // meta de provento médio/mes
+  const [metaAporte, setMetaAporte] = useEstadoSalvo("metaAporte", 0); // meta de aporte mensal (quanto investir/mês)
+  const [proventosRecebidos, setProventosRecebidos] = useEstadoSalvo("proventosRecebidos", { porMes:{}, total:0, registros:[] }); // realizado (da planilha B3)
   const [showMeta,   setShowMeta]   = useState(false);
+  const [showAporte, setShowAporte] = useState(false);
 
   // ── CARTÃO / CUSTO DE VIDA — salvos na memória ──────────────────────────
   const [custoVida, setCustoVida] = useEstadoSalvo("custoVida", { agua:100, luz:200, condominio:0, aluguel:1000, internet:120, outros:0 });
@@ -4016,6 +4665,32 @@ export default function App() {
     registrarLog("sistema", "App aberto", { direcao:"interno", origem:"app", detalhe:{ ativos: ativos.length, bridge: bridgeUrl } });
   }, []);
 
+  // AUTO-DETECT do servidor (Tailscale → Local → localhost) ao abrir o app
+  const [servidorNome, setServidorNome] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const achado = await detectarServidor((s, ok) =>
+        registrarLog("sistema", `Servidor ${s.nome}: ${ok ? "online ✓" : "sem resposta"}`, { direcao:"ida", origem:"app", detalhe:s.url })
+      );
+      if (!vivo) return;
+      if (achado) {
+        setBridgeUrl(achado.url);
+        setServidorNome(achado.nome);
+        try {
+          localStorage.setItem(PREFIXO+"lastConnection", new Date().toISOString());
+          const log = JSON.parse(localStorage.getItem(PREFIXO+"connectionLog")||"[]");
+          log.push({ quando:new Date().toISOString(), servidor:achado.nome, url:achado.url });
+          localStorage.setItem(PREFIXO+"connectionLog", JSON.stringify(log.slice(-30)));
+        } catch {}
+        registrarLog("sistema", `Conectado via ${achado.nome}`, { direcao:"volta", origem:"servidor", detalhe:achado.url });
+      } else {
+        registrarLog("erro", "Nenhum servidor respondeu ao /health", { direcao:"volta", origem:"app", detalhe:SERVIDORES.map(s=>s.url).join(", ") });
+      }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
   const T = TEMAS[temaId];
   const ehTV = layout === "tv";
   // fator de escala global: TV aumenta tudo, + multiplicador de fonte do usuario
@@ -4027,10 +4702,26 @@ export default function App() {
   const mediaMes   = totalAnual/12;
   // dividendo previsto para o mês atual (pela data real) — usado no card do topo
   const provEsteMes = (() => {
-    const m = new Date().getMonth()+1;
-    return ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m)).reduce((s,a)=>s+a.prov*a.qtd,0);
+    const hoje = new Date();
+    const m = hoje.getMonth()+1;
+    const primeiroDiaMes = `${hoje.getFullYear()}-${String(m).padStart(2,"0")}-01`;
+    return ativos.filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m)).reduce((s,a)=>{
+      // se comprou DURANTE ou DEPOIS do início do mês, não recebe o provento deste mês (data-base ~ início do mês)
+      if (a.dataCompra && a.dataCompra >= primeiroDiaMes) return s;
+      return s + a.prov*a.qtd;
+    }, 0);
   })();
   const patrimonioTotal = ativos.reduce((s,a)=>s+a.qtd*a.cotacao,0);
+  // aporte realizado este mês = soma das compras (movimentações da planilha B3) no mês atual
+  const aporteEsteMes = (() => {
+    const hoje = new Date();
+    const mesKey = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,"0")}`;
+    let t = 0;
+    ativos.forEach(a => (a.movimentacoes||[]).forEach(mv => {
+      if (mv.tipo==="compra" && mv.data && mv.data.slice(0,7)===mesKey) t += Math.abs(mv.qtd)*(mv.preco||0);
+    }));
+    return +t.toFixed(2);
+  })();
   const maxMes     = Math.max(...chartData.map(d=>d._total), 0);
   const positivos  = chartData.filter(d=>d._total>0);
   const minMes     = positivos.length ? Math.min(...positivos.map(d=>d._total)) : 0;
@@ -4088,7 +4779,10 @@ export default function App() {
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:16, marginBottom:14 }}>
               <div>
                 <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
-                <div style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</div>
+                <div style={{ display:"flex", alignItems:"baseline", gap:9, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</span>
+                  <span style={{ fontSize:18, fontWeight:800, color:T.cyan, lineHeight:1.1 }}>{fmt(provEsteMes)} <span style={{ fontSize:11, fontWeight:600 }}>este mês</span></span>
+                </div>
                 <div style={{ fontSize:11,color:T.textFaint,marginTop:2 }}>previsto para os próximos 12 meses</div>
               </div>
               <button onClick={()=>setShowCarteira(true)} title="Ver minha carteira" style={{ flex:1, minWidth:0, display:"flex", flexDirection:"column", alignItems:"flex-end", justifyContent:"center", gap:8, background:"transparent", border:"none", cursor:"pointer", padding:0, overflow:"hidden" }}>
@@ -4105,7 +4799,10 @@ export default function App() {
               </button>
               <div>
                 <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
-                <div style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</div>
+                <div style={{ display:"flex", alignItems:"baseline", gap:8, flexWrap:"wrap" }}>
+                  <span style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</span>
+                  <span style={{ fontSize:16, fontWeight:800, color:T.cyan, lineHeight:1.1 }}>{fmt(provEsteMes)} <span style={{ fontSize:10, fontWeight:600 }}>este mês</span></span>
+                </div>
                 <div style={{ fontSize:11,color:T.textFaint,marginTop:2 }}>previsto para os próximos 12 meses</div>
               </div>
             </div>
@@ -4130,7 +4827,7 @@ export default function App() {
         </div>
 
         {/* TRILHA DE METAS — progressão por estágios */}
-        <CarrosselMetas ativos={ativos} mediaMes={mediaMes} metaMensal={metaMensal} custoVida={custoVida} onConfigurar={()=>setShowMeta(true)} onAbrirAnalises={()=>setAba("analises")} onAbrirContas={()=>setAba("custovida")} onAbrirReserva={()=>setShowCarteira(true)} T={T} />
+        <CarrosselMetas ativos={ativos} mediaMes={mediaMes} metaMensal={metaMensal} metaAporte={metaAporte} aporteEsteMes={aporteEsteMes} custoVida={custoVida} onConfigurar={()=>setShowMeta(true)} onConfigAporte={()=>setShowAporte(true)} onAbrirAnalises={()=>setAba("analises")} onAbrirContas={()=>setAba("custovida")} onAbrirReserva={()=>setShowReserva(true)} T={T} />
         </>)}
       </div>
 
@@ -4139,8 +4836,14 @@ export default function App() {
         <ModalMeta metaMensal={metaMensal} setMetaMensal={setMetaMensal} valorAtual={mediaMes} onClose={()=>setShowMeta(false)} T={T} />
       )}
 
+      {showAporte && (
+        <ModalAporte metaAporte={metaAporte} setMetaAporte={setMetaAporte} aporteEsteMes={aporteEsteMes} onClose={()=>setShowAporte(false)} T={T} />
+      )}
+
       {/* PAINEL DE CONFIGURAÇÕES (modal) */}
       {showCarteira && <TelaCarteira ativos={ativos} onClose={()=>setShowCarteira(false)} onEditar={()=>setAba("editar")} T={T}/>}
+
+      {showReserva && <TelaReservaPlus ativos={ativos} onClose={()=>setShowReserva(false)} T={T}/>}
 
       {/* POPUP GLOBAL DE EDITAR/ADICIONAR ATIVO — abre de qualquer lugar */}
       {editandoTicker!==undefined && (
@@ -4148,7 +4851,7 @@ export default function App() {
       )}
 
       {/* MENU FLUTUANTE — Home no centro + atalhos, sempre leva à Home */}
-      {!showCarteira && editandoTicker===undefined && (
+      {!showCarteira && !showReserva && editandoTicker===undefined && (
         <div style={{ position:"fixed", left:0, right:0, bottom:14, display:"flex", justifyContent:"center", zIndex:900, pointerEvents:"none" }}>
           <div style={{ display:"flex", alignItems:"center", gap:4, background:T.card, border:`1px solid ${T.borderSoft}`, borderRadius:30, padding:"7px 10px", boxShadow:"0 8px 30px #0006", pointerEvents:"auto" }}>
             {[
@@ -4161,7 +4864,7 @@ export default function App() {
               const home = item.id==="__home__";
               const ativoTab = home ? aba==="painel" : aba===item.id;
               return (
-                <button key={item.id} onClick={()=>setAba(home?"painel":item.id)} title={item.lb} style={{
+                <button key={item.id} onClick={()=>{ const alvo = home?"painel":item.id; if (aba===alvo) { try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ window.scrollTo(0,0);} } else { setAba(alvo); } }} title={item.lb} style={{
                   display:"flex", flexDirection:"column", alignItems:"center", gap:1, cursor:"pointer", border:"none",
                   background: home ? T.accent : (ativoTab ? T.accentBg : "transparent"),
                   color: home ? "#fff" : (ativoTab ? T.accent : T.textMute),
@@ -4210,6 +4913,12 @@ export default function App() {
               document.body.appendChild(a); a.click(); document.body.removeChild(a);
               URL.revokeObjectURL(url);
             } catch(e){ window.alert("Não foi possível exportar neste ambiente. No APK funciona normalmente."); }
+          }}
+          onExportarPDF={()=>{
+            try {
+              registrarLog("sistema", "Relatório PDF gerado", { direcao:"interno", origem:"app" });
+              gerarRelatorioPDF({ ativos, metaMensal, custoVida, totalAnual, provEsteMes, mediaMes, patrimonioTotal });
+            } catch(e){ window.alert("Não foi possível gerar o PDF: "+e.message); }
           }}
           onImportar={()=>{
             try {
@@ -4331,7 +5040,7 @@ export default function App() {
         )}
 
         {/* ABA PAINEL (dashboard) */}
-        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} T={T}/>}
+        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} proventosRecebidos={proventosRecebidos} T={T}/>}
 
 
         {/* ABA CALENDÁRIO */}
@@ -4402,7 +5111,7 @@ export default function App() {
         {aba==="editar" && <EditarAtivos ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} T={T}/>}
 
         {/* ABA CHAT / ASSISTENTE IA */}
-        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} T={T}/>}
+        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} servidorNome={servidorNome} T={T}/>}
 
         {(aba==="analises"||aba==="ranking") && (
           <div style={{ background:T.cardAlt,border:`1px dashed ${T.borderSoft}`,borderRadius:10,padding:"10px 12px",marginTop:14 }}>
