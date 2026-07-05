@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
+import React, { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import {
@@ -1059,6 +1059,14 @@ function PainelCarteira({ ativos, historico = [], proventosRecebidos, blocosRend
 
       {/* ═══ VISTA: PROVENTOS — blocos configuráveis (Camada 2) ═══ */}
       {vista==="proventos" && (<>
+      {ativos.filter(a=>a.qtd>0).length===0 && (
+        <div style={{ background:T.card, border:`2px dashed ${T.accentBorder}`, borderRadius:16, padding:"26px 18px", textAlign:"center", marginBottom:16 }}>
+          <div style={{ fontSize:38, marginBottom:8 }}>🌱</div>
+          <div style={{ fontSize:15, fontWeight:800, color:T.text, marginBottom:6 }}>Sua carteira está vazia</div>
+          <div style={{ fontSize:11, color:T.textMute, lineHeight:1.6, marginBottom:14 }}>Adicione seu primeiro ativo (temos um catálogo com sugestões) ou importe a planilha da B3 na tela ✏️ Editar.</div>
+          <button onClick={()=>abrirEditorAtivo(null)} style={{ padding:"12px 20px", borderRadius:10, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:13, fontWeight:700 }}>➕ Adicionar primeiro ativo</button>
+        </div>
+      )}
       {blocosRender
         ? blocosRender
         : (<>{/* fallback: ordem padrão da instalação (base intacta) */}
@@ -3264,7 +3272,7 @@ function CenarioFuturo({ ativos, fundosProvisionados = 0, T }) {
           {/* top yields — barras */}
           <div style={{ fontSize:9, color:T.textFaint, marginBottom:6, textTransform:"uppercase", letterSpacing:1 }}>Maiores rendimentos da carteira</div>
           {rankYield.slice(0,5).map((r,i)=>{
-            const max = rankYield[0].yieldAnual||1;
+            const max = rankYield[0]?.yieldAnual||1;
             const c = corDe(r.ticker, r.cat, T);
             return (
               <div key={r.ticker} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
@@ -5775,6 +5783,32 @@ function TelaAuth({ aoEntrar }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// ERRO VISÍVEL — se algo quebrar, mostra o erro na tela (em vez de tela preta)
+// ════════════════════════════════════════════════════════════════════════════
+class ErroApp extends React.Component {
+  constructor(props){ super(props); this.state = { erro:null }; }
+  static getDerivedStateFromError(erro){ return { erro }; }
+  componentDidCatch(erro, info){ try { registrarLog("sistema", `ERRO fatal: ${erro?.message}`, { direcao:"interno", origem:"app", detalhe:String(info?.componentStack||"").slice(0,400) }); } catch {} }
+  render(){
+    if (!this.state.erro) return this.props.children;
+    return (
+      <div style={{ minHeight:"100vh", background:"#f6f7f9", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+        <div style={{ maxWidth:420, width:"100%", background:"#fff", border:"1px solid #e5e7eb", borderRadius:16, padding:22, textAlign:"center" }}>
+          <div style={{ fontSize:36 }}>🛠️</div>
+          <div style={{ fontSize:16, fontWeight:800, color:"#111", margin:"8px 0" }}>Algo quebrou nesta tela</div>
+          <div style={{ fontSize:11, color:"#666", lineHeight:1.6, marginBottom:12 }}>Manda um print desta mensagem para o desenvolvedor:</div>
+          <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"10px 12px", fontSize:11, color:"#b91c1c", fontFamily:"monospace", wordBreak:"break-word", marginBottom:14, textAlign:"left" }}>{String(this.state.erro?.message || this.state.erro)}</div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={()=>{ this.setState({ erro:null }); }} style={{ flex:1, padding:"12px", borderRadius:10, border:"1px solid #d1d5db", background:"#f9fafb", color:"#111", cursor:"pointer", fontSize:12, fontWeight:700 }}>↻ Tentar de novo</button>
+            <button onClick={()=>{ try { localStorage.removeItem(SESSAO_KEY); } catch {} window.location.reload(); }} style={{ flex:1, padding:"12px", borderRadius:10, border:"none", background:"#111", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>Sair e recarregar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // ROOT — controla a sessão; cada conta tem seus próprios dados (PREFIXO próprio)
 // ════════════════════════════════════════════════════════════════════════════
 export default function Root() {
@@ -5785,5 +5819,5 @@ export default function Root() {
   const sair = () => { try { localStorage.removeItem(SESSAO_KEY); } catch {} setUsuario(null); };
   const contaNome = (() => { try { return lerContas()[usuario]?.nome || ""; } catch { return ""; } })();
   if (!usuario) return <TelaAuth aoEntrar={entrar}/>;
-  return <AppCarteira key={usuario} usuario={usuario} contaNome={contaNome} onLogout={sair}/>;
+  return <ErroApp><AppCarteira key={usuario} usuario={usuario} contaNome={contaNome} onLogout={sair}/></ErroApp>;
 }
