@@ -513,54 +513,70 @@ const COR_SETOR = {
   "Índice & Cripto":"#f472b6", "Outros":"#64748b",
 };
 
-const ATIVOS_INICIAIS = [
-  { ticker:"MFII11",nome:"Mérito Desenvolvimento",  cat:"FII", freq:"Mensal",    qtd:132,prov:1.06,precoMedio:53.45,cotacao:50.71,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"VGHF11",nome:"Valora Hedge Fund",        cat:"FII", freq:"Mensal",    qtd:333,prov:0.07,precoMedio:6.05, cotacao:5.99, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"RBRY11",nome:"BR Credit",                cat:"FII", freq:"Mensal",    qtd:21, prov:1.00,precoMedio:91.23,cotacao:89.49,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"OIAG11",nome:"Ourinvest Agro",           cat:"FII", freq:"Mensal",    qtd:146,prov:0.08,precoMedio:8.57, cotacao:8.15, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"CPTS11",nome:"Capitânia Securities",     cat:"FII", freq:"Mensal",    qtd:152,prov:0.09,precoMedio:7.42, cotacao:7.39, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"GARE11",nome:"Guardian",                 cat:"FII", freq:"Mensal",    qtd:114,prov:0.08,precoMedio:8.38, cotacao:8.14, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"TRXF11",nome:"TRX Real Estate",          cat:"FII", freq:"Mensal",    qtd:10, prov:0.85,precoMedio:91.46,cotacao:91.53,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"RBRX11",nome:"RBR Properties",           cat:"FII", freq:"Mensal",    qtd:112,prov:0.09,precoMedio:8.62, cotacao:8.11, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"IRIM11",nome:"Iridium Recebíveis",       cat:"FII", freq:"Mensal",    qtd:12, prov:0.90,precoMedio:65.79,cotacao:65.95,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"KNCR11",nome:"Kinea Crédito Real",       cat:"FII", freq:"Mensal",    qtd:5,  prov:1.10,precoMedio:106.83,cotacao:107.28,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"VISC11",nome:"Vinci Shopping Centers",   cat:"FII", freq:"Mensal",    qtd:3,  prov:0.72,precoMedio:106.14,cotacao:103.86,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"XPML11",nome:"XP Malls",                 cat:"FII", freq:"Mensal",    qtd:2,  prov:0.72,precoMedio:107.44,cotacao:103.98,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"MXRF11",nome:"Maxi Renda",               cat:"FII", freq:"Mensal",    qtd:16, prov:0.10,precoMedio:9.71, cotacao:9.68, meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"BBAS3", nome:"Banco do Brasil",  cat:"Ação",freq:"Trimestral", qtd:291,prov:0.14,precoMedio:20.55,cotacao:19.86,meses:[3,6,9,12] },
-  { ticker:"PETR4", nome:"Petrobras",        cat:"Ação",freq:"Trimestral", qtd:145,prov:0.47,precoMedio:40.75,cotacao:39.33,meses:[2,5,8,11] },
-  { ticker:"BBDC3", nome:"Bradesco",         cat:"Ação",freq:"Mensal",     qtd:50, prov:0.02,precoMedio:15.73,cotacao:15.54,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"ITSA4", nome:"Itaúsa",           cat:"Ação",freq:"Trimestral", qtd:116,prov:0.08,precoMedio:13.06,cotacao:13.03,meses:[1,4,7,10] },
-  { ticker:"BBSE3", nome:"BB Seguridade",    cat:"Ação",freq:"Semestral",  qtd:9,  prov:0.40,precoMedio:37.47,cotacao:38.27,meses:[5,11] },
-  { ticker:"TAEE11",nome:"Taesa",            cat:"Ação",freq:"Semestral",  qtd:6,  prov:0.90,precoMedio:41.68,cotacao:39.79,meses:[6,12] },
-  { ticker:"BRSR6", nome:"Banrisul",         cat:"Ação",freq:"Trimestral", qtd:44, prov:0.32,precoMedio:15.76,cotacao:13.55,meses:[3,6,9,12] },
-  { ticker:"KLBN4", nome:"Klabin PN",        cat:"Ação",freq:"Semestral",  qtd:332,prov:0.10,precoMedio:3.41, cotacao:3.37, meses:[4,10] },
-  { ticker:"KLBN11",nome:"Klabin UNT",       cat:"Ação",freq:"Semestral",  qtd:14, prov:0.25,precoMedio:17.03,cotacao:16.81,meses:[4,10] },
-  { ticker:"CXSE3", nome:"Caixa Seguridade", cat:"Ação",freq:"Semestral",  qtd:13, prov:0.35,precoMedio:17.66,cotacao:19.43,meses:[5,11] },
-  { ticker:"WEGE3", nome:"Weg",              cat:"Ação",freq:"Semestral",  qtd:2,  prov:0.12,precoMedio:44.96,cotacao:45.71,meses:[4,10] },
-  { ticker:"CPLE3", nome:"Copel",            cat:"Ação",freq:"Semestral",  qtd:3,  prov:0.22,precoMedio:15.63,cotacao:14.99,meses:[5,11] },
-  { ticker:"SANB3", nome:"Santander",        cat:"Ação",freq:"Trimestral", qtd:102,prov:0.06,precoMedio:12.90,cotacao:12.86,meses:[3,6,9,12] },
-  { ticker:"EMBJ3", nome:"Embraer",          cat:"Ação",freq:"Anual",      qtd:2,  prov:0.55,precoMedio:79.62,cotacao:78.80,meses:[12] },
-  { ticker:"B3SA3", nome:"B3 Brasil Bolsa",  cat:"Ação",freq:"Trimestral", qtd:10, prov:0.12,precoMedio:15.63,cotacao:14.72,meses:[3,6,9,12] },
-  { ticker:"SBSP3", nome:"Sabesp",           cat:"Ação",freq:"Anual",      qtd:4,  prov:0.80,precoMedio:28.80,cotacao:28.16,meses:[8] },
-  { ticker:"BOVA11",nome:"iShares Ibovespa", cat:"Ação",freq:"Semestral",  qtd:3,  prov:1.50,precoMedio:175.40,cotacao:168.21,meses:[1,7] },
-  { ticker:"BOVX11",nome:"Trend Ibovespa",   cat:"Ação",freq:"Semestral",  qtd:3,  prov:0.15,precoMedio:20.12,cotacao:17.56,meses:[1,7] },
-  { ticker:"COIN11",nome:"Hashdex Nasdaq Crypto",cat:"Cripto",freq:"Mensal", qtd:33, prov:0.00,precoMedio:40.73,cotacao:39.20,meses:[1,2,3,4,5,6,7,8,9,10,11,12] },
-  { ticker:"GOLD11",nome:"BTG Futuro de Ouro",   cat:"ETF",   freq:"—",        qtd:7,  prov:0.00,precoMedio:22.74,cotacao:22.74,meses:[] },
-  { ticker:"PAGS34",nome:"PagSeguro (BDR)",      cat:"Ação",  freq:"—",        qtd:5,  prov:0.00,precoMedio:9.91, cotacao:9.91, meses:[] },
-  { ticker:"VWRA11",nome:"Investo FTSE All-World",cat:"ETF",  freq:"—",        qtd:1,  prov:0.00,precoMedio:111.33,cotacao:111.33,meses:[] },
-  { ticker:"Tesouro IPCA+ 2050",nome:"Tesouro IPCA+ 2050",cat:"Tesouro",freq:"—",qtd:0.33,prov:0,precoMedio:920.03,cotacao:948.15,meses:[] },
-  { ticker:"Tesouro IPCA+ 2032",nome:"Tesouro IPCA+ 2032",cat:"Tesouro",freq:"—",qtd:0.17,prov:0,precoMedio:2904.60,cotacao:2871.73,meses:[] },
-  { ticker:"Tesouro Prefixado 2029",nome:"Tesouro Prefixado 2029",cat:"Tesouro",freq:"—",qtd:0.37,prov:0,precoMedio:711.76,cotacao:710.60,meses:[] },
-  { ticker:"Tesouro Prefixado com Juros Semestrais 2037",nome:"Tesouro Pref. Juros Sem. 2037",cat:"Tesouro",freq:"Semestral",qtd:0.17,prov:0,precoMedio:811.97,cotacao:826.90,meses:[1,7] },
-].map(a => ({ ...a, setor: SETOR_TICKER[a.ticker] || "Outros" }));
+const ATIVOS_INICIAIS = []; // conta nova começa do zero — ativos são adicionados pelo usuário
+
+// ════════════════════════════════════════════════════════════════════════════
+// CATÁLOGO DE ATIVOS — sugestões ao adicionar (t=ticker, n=nome, c=cat, s=setor, f=freq)
+// ════════════════════════════════════════════════════════════════════════════
+const CATALOGO_ATIVOS = [
+  {t:"VALE3",n:"Vale",c:"Ação",s:"Mineração",f:"Semestral"},{t:"PETR4",n:"Petrobras PN",c:"Ação",s:"Petróleo",f:"Trimestral"},{t:"PETR3",n:"Petrobras ON",c:"Ação",s:"Petróleo",f:"Trimestral"},
+  {t:"ITUB4",n:"Itaú Unibanco",c:"Ação",s:"Bancos",f:"Mensal"},{t:"BBDC4",n:"Bradesco",c:"Ação",s:"Bancos",f:"Mensal"},{t:"BBAS3",n:"Banco do Brasil",c:"Ação",s:"Bancos",f:"Trimestral"},
+  {t:"SANB11",n:"Santander",c:"Ação",s:"Bancos",f:"Semestral"},{t:"ITSA4",n:"Itaúsa",c:"Ação",s:"Holdings",f:"Trimestral"},{t:"B3SA3",n:"B3",c:"Ação",s:"Financeiro",f:"Trimestral"},
+  {t:"BBSE3",n:"BB Seguridade",c:"Ação",s:"Seguros",f:"Semestral"},{t:"CXSE3",n:"Caixa Seguridade",c:"Ação",s:"Seguros",f:"Semestral"},{t:"PSSA3",n:"Porto Seguro",c:"Ação",s:"Seguros",f:"Trimestral"},
+  {t:"WEGE3",n:"WEG",c:"Ação",s:"Industrial",f:"Trimestral"},{t:"ABEV3",n:"Ambev",c:"Ação",s:"Bebidas",f:"Anual"},{t:"SUZB3",n:"Suzano",c:"Ação",s:"Papel e Celulose",f:"Anual"},
+  {t:"KLBN11",n:"Klabin",c:"Ação",s:"Papel e Celulose",f:"Trimestral"},{t:"GGBR4",n:"Gerdau",c:"Ação",s:"Siderurgia",f:"Trimestral"},{t:"CSNA3",n:"CSN",c:"Ação",s:"Siderurgia",f:"Anual"},
+  {t:"USIM5",n:"Usiminas",c:"Ação",s:"Siderurgia",f:"Anual"},{t:"CMIG4",n:"Cemig",c:"Ação",s:"Energia",f:"Semestral"},{t:"CPLE6",n:"Copel",c:"Ação",s:"Energia",f:"Semestral"},
+  {t:"ELET3",n:"Eletrobras",c:"Ação",s:"Energia",f:"Anual"},{t:"EGIE3",n:"Engie Brasil",c:"Ação",s:"Energia",f:"Semestral"},{t:"TAEE11",n:"Taesa",c:"Ação",s:"Energia",f:"Trimestral"},
+  {t:"TRPL4",n:"ISA Energia",c:"Ação",s:"Energia",f:"Anual"},{t:"CPFE3",n:"CPFL Energia",c:"Ação",s:"Energia",f:"Anual"},{t:"AURE3",n:"Auren",c:"Ação",s:"Energia",f:"Anual"},
+  {t:"NEOE3",n:"Neoenergia",c:"Ação",s:"Energia",f:"Anual"},{t:"SBSP3",n:"Sabesp",c:"Ação",s:"Saneamento",f:"Anual"},{t:"CSMG3",n:"Copasa",c:"Ação",s:"Saneamento",f:"Trimestral"},
+  {t:"SAPR11",n:"Sanepar",c:"Ação",s:"Saneamento",f:"Trimestral"},{t:"VIVT3",n:"Vivo",c:"Ação",s:"Telecom",f:"Trimestral"},{t:"TIMS3",n:"TIM",c:"Ação",s:"Telecom",f:"Trimestral"},
+  {t:"RADL3",n:"RaiaDrogasil",c:"Ação",s:"Saúde",f:"Trimestral"},{t:"HYPE3",n:"Hypera",c:"Ação",s:"Saúde",f:"Trimestral"},{t:"FLRY3",n:"Fleury",c:"Ação",s:"Saúde",f:"Trimestral"},
+  {t:"RENT3",n:"Localiza",c:"Ação",s:"Locação",f:"Trimestral"},{t:"RAIL3",n:"Rumo",c:"Ação",s:"Logística",f:"Anual"},{t:"MOTV3",n:"Motiva (CCR)",c:"Ação",s:"Concessões",f:"Anual"},
+  {t:"EMBR3",n:"Embraer",c:"Ação",s:"Aeroespacial",f:"—"},{t:"PRIO3",n:"PRIO",c:"Ação",s:"Petróleo",f:"—"},{t:"RECV3",n:"PetroRecôncavo",c:"Ação",s:"Petróleo",f:"Trimestral"},
+  {t:"CSAN3",n:"Cosan",c:"Ação",s:"Energia",f:"Anual"},{t:"UGPA3",n:"Ultrapar",c:"Ação",s:"Distribuição",f:"Semestral"},{t:"VBBR3",n:"Vibra",c:"Ação",s:"Distribuição",f:"Semestral"},
+  {t:"LREN3",n:"Lojas Renner",c:"Ação",s:"Varejo",f:"Trimestral"},{t:"MGLU3",n:"Magazine Luiza",c:"Ação",s:"Varejo",f:"—"},{t:"JBSS3",n:"JBS",c:"Ação",s:"Alimentos",f:"Anual"},
+  {t:"BRFS3",n:"BRF",c:"Ação",s:"Alimentos",f:"—"},{t:"BEEF3",n:"Minerva",c:"Ação",s:"Alimentos",f:"Anual"},
+  {t:"MXRF11",n:"Maxi Renda",c:"FII",s:"Papel",f:"Mensal"},{t:"KNCR11",n:"Kinea Rendimentos",c:"FII",s:"Papel",f:"Mensal"},{t:"KNIP11",n:"Kinea Índice de Preços",c:"FII",s:"Papel",f:"Mensal"},
+  {t:"KNRI11",n:"Kinea Renda Imobiliária",c:"FII",s:"Híbrido",f:"Mensal"},{t:"HGLG11",n:"CSHG Logística",c:"FII",s:"Logística",f:"Mensal"},{t:"BTLG11",n:"BTG Logística",c:"FII",s:"Logística",f:"Mensal"},
+  {t:"VILG11",n:"Vinci Logística",c:"FII",s:"Logística",f:"Mensal"},{t:"XPLG11",n:"XP Log",c:"FII",s:"Logística",f:"Mensal"},{t:"LVBI11",n:"VBI Logístico",c:"FII",s:"Logística",f:"Mensal"},
+  {t:"HGRU11",n:"CSHG Renda Urbana",c:"FII",s:"Renda Urbana",f:"Mensal"},{t:"TRXF11",n:"TRX Real Estate",c:"FII",s:"Renda Urbana",f:"Mensal"},{t:"GARE11",n:"Guardian Real Estate",c:"FII",s:"Renda Urbana",f:"Mensal"},
+  {t:"HGRE11",n:"CSHG Real Estate",c:"FII",s:"Lajes",f:"Mensal"},{t:"PVBI11",n:"VBI Prime Properties",c:"FII",s:"Lajes",f:"Mensal"},{t:"JSRE11",n:"JS Real Estate",c:"FII",s:"Lajes",f:"Mensal"},
+  {t:"XPML11",n:"XP Malls",c:"FII",s:"Shoppings",f:"Mensal"},{t:"VISC11",n:"Vinci Shopping Centers",c:"FII",s:"Shoppings",f:"Mensal"},{t:"HGBS11",n:"Hedge Brasil Shopping",c:"FII",s:"Shoppings",f:"Mensal"},
+  {t:"MALL11",n:"Malls Brasil Plural",c:"FII",s:"Shoppings",f:"Mensal"},{t:"HSML11",n:"HSI Malls",c:"FII",s:"Shoppings",f:"Mensal"},{t:"MFII11",n:"Mérito Desenvolvimento",c:"FII",s:"Desenvolvimento",f:"Mensal"},
+  {t:"CPTS11",n:"Capitânia Securities",c:"FII",s:"Papel",f:"Mensal"},{t:"VGHF11",n:"Valora Hedge Fund",c:"FII",s:"Multiestratégia",f:"Mensal"},{t:"VGIR11",n:"Valora CRI",c:"FII",s:"Papel",f:"Mensal"},
+  {t:"RBRY11",n:"RBR Crédito Estruturado",c:"FII",s:"Papel",f:"Mensal"},{t:"RBRR11",n:"RBR High Grade",c:"FII",s:"Papel",f:"Mensal"},{t:"IRDM11",n:"Iridium Recebíveis",c:"FII",s:"Papel",f:"Mensal"},
+  {t:"VRTA11",n:"Fator Verità",c:"FII",s:"Papel",f:"Mensal"},{t:"RECR11",n:"REC Recebíveis",c:"FII",s:"Papel",f:"Mensal"},{t:"BCFF11",n:"BTG Fundo de Fundos",c:"FII",s:"FoF",f:"Mensal"},
+  {t:"RBRF11",n:"RBR Alpha",c:"FII",s:"FoF",f:"Mensal"},{t:"HFOF11",n:"Hedge Top FoF",c:"FII",s:"FoF",f:"Mensal"},{t:"VINO11",n:"Vinci Offices",c:"FII",s:"Lajes",f:"Mensal"},
+  {t:"RZTR11",n:"Riza Terrax",c:"FII",s:"Agro",f:"Mensal"},{t:"OIAG11",n:"Ourinvest Agro",c:"FII",s:"Agro",f:"Mensal"},{t:"KNSC11",n:"Kinea Securities",c:"FII",s:"Papel",f:"Mensal"},
+  {t:"BOVA11",n:"iShares Ibovespa",c:"ETF",s:"Índice BR",f:"—"},{t:"IVVB11",n:"iShares S&P 500",c:"ETF",s:"Internacional",f:"—"},{t:"SMAL11",n:"iShares Small Caps",c:"ETF",s:"Índice BR",f:"—"},
+  {t:"DIVO11",n:"It Now Dividendos",c:"ETF",s:"Dividendos",f:"—"},{t:"HASH11",n:"Hashdex Cripto",c:"ETF",s:"Cripto",f:"—"},{t:"GOLD11",n:"Trend Ouro",c:"ETF",s:"Ouro",f:"—"},
+  {t:"XFIX11",n:"Trend IFIX",c:"ETF",s:"FIIs",f:"Mensal"},{t:"IMAB11",n:"It Now IMA-B",c:"ETF",s:"Renda Fixa",f:"—"},{t:"B5P211",n:"It Now IMA-B5",c:"ETF",s:"Renda Fixa",f:"—"},{t:"WRLD11",n:"Trend Mundo",c:"ETF",s:"Internacional",f:"—"},
+  {t:"AAPL34",n:"Apple",c:"Ação",s:"BDR · Tecnologia",f:"Trimestral"},{t:"MSFT34",n:"Microsoft",c:"Ação",s:"BDR · Tecnologia",f:"Trimestral"},{t:"GOGL34",n:"Alphabet (Google)",c:"Ação",s:"BDR · Tecnologia",f:"—"},
+  {t:"AMZO34",n:"Amazon",c:"Ação",s:"BDR · Tecnologia",f:"—"},{t:"TSLA34",n:"Tesla",c:"Ação",s:"BDR · Automotivo",f:"—"},{t:"NVDC34",n:"NVIDIA",c:"Ação",s:"BDR · Tecnologia",f:"Trimestral"},
+  {t:"META34",n:"Meta (Facebook)",c:"Ação",s:"BDR · Tecnologia",f:"Trimestral"},{t:"NFLX34",n:"Netflix",c:"Ação",s:"BDR · Mídia",f:"—"},{t:"DISB34",n:"Disney",c:"Ação",s:"BDR · Mídia",f:"Anual"},{t:"COCA34",n:"Coca-Cola",c:"Ação",s:"BDR · Consumo",f:"Trimestral"},
+  {t:"PAGS34",n:"PagSeguro",c:"Ação",s:"BDR · Pagamentos",f:"—"},{t:"VWRA11",n:"Investo FTSE All-World",c:"ETF",s:"Internacional",f:"—"},
+  {t:"TESOURO SELIC 2029",n:"Tesouro Selic 2029",c:"Tesouro",s:"Renda Fixa",f:"—"},{t:"TESOURO IPCA+ 2035",n:"Tesouro IPCA+ 2035",c:"Tesouro",s:"Renda Fixa",f:"—"},
+  {t:"TESOURO IPCA+ 2045",n:"Tesouro IPCA+ 2045",c:"Tesouro",s:"Renda Fixa",f:"—"},{t:"TESOURO PREFIXADO 2029",n:"Tesouro Prefixado 2029",c:"Tesouro",s:"Renda Fixa",f:"—"},
+  {t:"TESOURO RENDA+ 2065",n:"Tesouro Renda+ 2065",c:"Tesouro",s:"Renda Fixa",f:"—"},
+  {t:"BTC",n:"Bitcoin",c:"Cripto",s:"Cripto",f:"—"},{t:"ETH",n:"Ethereum",c:"Cripto",s:"Cripto",f:"—"},
+];
 
 // ════════════════════════════════════════════════════════════════════════════
 // PERSISTÊNCIA — salva tudo na memória permanente do app (localStorage)
 // Funciona no APK. No preview do Claude o localStorage é bloqueado, então
 // envolvemos em try/catch: lá não salva, mas também não quebra.
 // ════════════════════════════════════════════════════════════════════════════
-const PREFIXO = "carteiraProventos_";
+let PREFIXO = "carteiraProventos_"; // muda por usuário após o login (dados separados por conta)
+const CONTAS_KEY = "carteiraProventos_CONTAS";
+const SESSAO_KEY = "carteiraProventos_SESSAO";
+function definirUsuarioAtivo(email) {
+  const slug = String(email||"").toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 40);
+  PREFIXO = "carteiraProventos_u_" + slug + "_";
+}
+function hashSenha(sx) { let h=5381; const str=String(sx); for (let i=0;i<str.length;i++){ h=((h<<5)+h+str.charCodeAt(i))|0; } return "h"+(h>>>0).toString(36); }
+function lerContas(){ try { return JSON.parse(localStorage.getItem(CONTAS_KEY)||"{}")||{}; } catch { return {}; } }
+function gravarContas(c){ try { localStorage.setItem(CONTAS_KEY, JSON.stringify(c)); } catch {} }
+function gerarFraseRec(){ const P=["verde","ouro","lua","rio","trigo","norte","pinho","sol","mar","serra","campo","aurora"]; const r=()=>P[Math.floor(Math.random()*P.length)]; return `${r()}-${r()}-${r()}-${Math.floor(100+Math.random()*900)}`; }
 
 function lerSalvo(chave, padrao) {
   try {
@@ -2372,8 +2388,15 @@ function EditarAtivoPopup({ ticker, ativos, setAtivos, onClose, T }) {
         <div style={{ display:"flex", gap:10 }}>
           <div style={{ flex:1 }}>
             <Campo label="Ticker">
-              <input value={f.ticker} onChange={e=>set("ticker",e.target.value.toUpperCase())} disabled={!novo}
-                placeholder="BBAS3" style={{ ...inputStyle, fontWeight:700, opacity:novo?1:0.6, fontFamily:"monospace" }}/>
+              <input value={f.ticker} list="catalogoAtivos" onChange={e=>{
+                  const v = e.target.value.toUpperCase();
+                  const hit = novo ? CATALOGO_ATIVOS.find(c=>c.t===v) : null;
+                  if (hit) setF(p=>({ ...p, ticker:v, nome:hit.n, cat:hit.c, setor:hit.s, freq:hit.f||"—",
+                    meses: hit.c==="FII" ? [1,2,3,4,5,6,7,8,9,10,11,12] : (hit.f==="Trimestral" ? [3,6,9,12] : p.meses) }));
+                  else set("ticker", v);
+                }} disabled={!novo}
+                placeholder="Digite ou escolha…" style={{ ...inputStyle, fontWeight:700, opacity:novo?1:0.6, fontFamily:"monospace" }}/>
+              {novo && <datalist id="catalogoAtivos">{CATALOGO_ATIVOS.map(c=><option key={c.t} value={c.t}>{c.n} · {c.c}</option>)}</datalist>}
             </Campo>
           </div>
           <div style={{ flex:1.4 }}>
@@ -4711,7 +4734,7 @@ function OrganizarBlocos({ layoutBlocos, setLayoutBlocos, onClose, T }) {
   );
 }
 
-function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onResetDados, onResetApp, onDesfazerDados, onExportar, onImportar, onExportarPDF, onOrganizarBlocos, onClose }) {
+function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onResetDados, onResetApp, onDesfazerDados, onExportar, onImportar, onExportarPDF, onOrganizarBlocos, usuario, onLogout, onClose }) {
   const [showLogs, setShowLogs] = useState(false);
   const [secAberta, setSecAberta] = useState("aparencia");
   // uso de armazenamento local (dados do app no aparelho)
@@ -4770,12 +4793,14 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
         {/* ═══ 🎨 APARÊNCIA ═══ */}
         {sanfona({ id:"aparencia", emoji:"🎨", titulo:"Aparência", sub:"Tema, exibição, fonte e densidade", children:(<>
           {mini("Tema de cores")}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+          <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:6, scrollSnapType:"x mandatory" }}>
             {Object.entries(TEMAS).map(([id,tema])=>(
-              <Opcao key={id} ativo={temaId===id} onClick={()=>setTemaId(id)}>
-                <span style={{ fontSize:22 }}>{tema.emoji}</span>
-                <span>{tema.nome}</span>
-              </Opcao>
+              <div key={id} style={{ flex:"0 0 auto", width:104, scrollSnapAlign:"start", display:"flex" }}>
+                <Opcao ativo={temaId===id} onClick={()=>setTemaId(id)}>
+                  <span style={{ fontSize:22 }}>{tema.emoji}</span>
+                  <span style={{ fontSize:11, whiteSpace:"nowrap" }}>{tema.nome}</span>
+                </Opcao>
+              </div>
             ))}
           </div>
 
@@ -4917,6 +4942,11 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
               <div style={{ fontSize:13, fontWeight:800, color:T.text }}>{usoStorage}</div>
             </div>
           </div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:10, background:T.cardAlt, borderRadius:10, padding:"10px 12px" }}>
+            <span style={{ fontSize:14 }}>👤</span>
+            <span style={{ flex:1, minWidth:0, fontSize:11, color:T.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{usuario || "—"}</span>
+            <button onClick={onLogout} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${T.red}55`, background:`${T.red}12`, color:T.red, cursor:"pointer", fontSize:11, fontWeight:700 }}>Sair</button>
+          </div>
           {nota("App pessoal de acompanhamento de dividendos da B3 com assistente de IA local e privado. Seus dados não saem do seu aparelho (exceto o chat, que fala com o SEU servidor).")}
         </>)})}
 
@@ -4937,8 +4967,8 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
 
 // ════════════════════════════════════════════════════════════════════════════
 // APP PRINCIPAL
-export default function App() {
-  const [temaId, setTemaId] = useEstadoSalvo("tema", "padrao");
+function AppCarteira({ usuario, contaNome, onLogout }) {
+  const [temaId, setTemaId] = useEstadoSalvo("tema", "minimalista2");
   const [ativos, setAtivos] = useState(carregarAtivos);
   const [filtro, setFiltro] = useState("TUDO");
   const [mesSel, setMesSel] = useState(0);
@@ -5126,6 +5156,33 @@ export default function App() {
       }
     })();
     return () => { vivo = false; };
+  }, []);
+
+  // ── BOTÃO VOLTAR (Android/navegador): desfaz o percurso dentro do app ──
+  const navPilha = useRef([]);
+  const navRestaurando = useRef(false);
+  const navPrev = useRef(null);
+  useEffect(() => {
+    const atual = { aba, showCarteira, showReserva, showConfig, showBlocos, showImport, showMeta, showAporte, editandoTicker };
+    if (navPrev.current === null) { navPrev.current = atual; return; }
+    if (JSON.stringify(atual) === JSON.stringify(navPrev.current)) return;
+    if (navRestaurando.current) { navRestaurando.current = false; navPrev.current = atual; return; }
+    navPilha.current.push(navPrev.current);
+    if (navPilha.current.length > 60) navPilha.current.shift();
+    navPrev.current = atual;
+    try { window.history.pushState({ carteiraNav:true }, ""); } catch {}
+  }, [aba, showCarteira, showReserva, showConfig, showBlocos, showImport, showMeta, showAporte, editandoTicker]);
+  useEffect(() => {
+    const onPop = () => {
+      const alvo = navPilha.current.pop();
+      if (!alvo) return; // pilha vazia → comportamento padrão (sair do app)
+      navRestaurando.current = true;
+      setAba(alvo.aba); setShowCarteira(!!alvo.showCarteira); setShowReserva(!!alvo.showReserva);
+      setShowConfig(!!alvo.showConfig); setShowBlocos(!!alvo.showBlocos); setShowImport(!!alvo.showImport);
+      setShowMeta(!!alvo.showMeta); setShowAporte(!!alvo.showAporte); setEditandoTicker(alvo.editandoTicker);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   const T = TEMAS[temaId];
@@ -5359,7 +5416,7 @@ export default function App() {
           }}
           onResetApp={()=>{
             if(window.confirm("RESET DE CONFIGURAÇÃO DO APP\n\nIsso volta a aparência (tema, layout, densidade, fonte) ao padrão de instalação. Seus dados da carteira NÃO são afetados. Continuar?")){
-              setTemaId("padrao"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); setLayoutBlocos(null); setEstilosCustom(null);
+              setTemaId("minimalista2"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); setLayoutBlocos(null); setEstilosCustom(null);
               registrarLog("sistema","Reset de configuração do app (aparência padrão)",{ direcao:"interno", origem:"app" });
               setShowConfig(false);
             }
@@ -5396,6 +5453,8 @@ export default function App() {
               URL.revokeObjectURL(url);
             } catch(e){ window.alert("Não foi possível exportar neste ambiente. No APK funciona normalmente."); }
           }}
+          usuario={usuario}
+          onLogout={onLogout}
           onOrganizarBlocos={()=>{ setShowConfig(false); setShowBlocos(true); }}
           onExportarPDF={()=>{
             try {
@@ -5608,4 +5667,123 @@ export default function App() {
       </div>{/* fim wrapper de zoom */}
     </div>
   );
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// TELA DE LOGIN / CADASTRO / RECUPERAÇÃO — contas locais (dados por conta)
+// ════════════════════════════════════════════════════════════════════════════
+function TelaAuth({ aoEntrar }) {
+  const T = TEMAS.minimalista2 || TEMAS[Object.keys(TEMAS)[0]];
+  const [modo, setModo] = useState("login"); // login | cadastro | frase | recuperar
+  const [email, setEmail] = useState("");
+  const [nome, setNome] = useState("");
+  const [senha, setSenha] = useState("");
+  const [senha2, setSenha2] = useState("");
+  const [frase, setFrase] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [fraseGerada, setFraseGerada] = useState("");
+  const [erro, setErro] = useState("");
+  const em = email.trim().toLowerCase();
+  const inp = { width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:10, color:T.text, padding:"12px 14px", fontSize:14, outline:"none", marginBottom:10 };
+  const btnP = { width:"100%", padding:"13px", borderRadius:10, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:14, fontWeight:700 };
+  const btnL = { background:"none", border:"none", color:T.accentSoft, cursor:"pointer", fontSize:12, fontWeight:600, padding:6 };
+
+  const entrar = () => {
+    setErro("");
+    const c = lerContas()[em];
+    if (!c) { setErro("Conta não encontrada. Crie uma conta."); return; }
+    if (c.senhaHash !== hashSenha(senha)) { setErro("Senha incorreta."); return; }
+    aoEntrar(em);
+  };
+  const cadastrar = () => {
+    setErro("");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { setErro("Digite um e-mail válido."); return; }
+    if (senha.length < 4) { setErro("A senha precisa de pelo menos 4 caracteres."); return; }
+    if (senha !== senha2) { setErro("As senhas não conferem."); return; }
+    const contas = lerContas();
+    if (contas[em]) { setErro("Já existe uma conta com este e-mail."); return; }
+    const fr = gerarFraseRec();
+    contas[em] = { nome: nome.trim()||em.split("@")[0], senhaHash: hashSenha(senha), fraseRec: hashSenha(fr.toLowerCase()), criadoEm: new Date().toISOString() };
+    gravarContas(contas);
+    setFraseGerada(fr); setModo("frase");
+  };
+  const recuperar = () => {
+    setErro("");
+    const contas = lerContas();
+    const c = contas[em];
+    if (!c) { setErro("Conta não encontrada."); return; }
+    if (hashSenha(frase.trim().toLowerCase()) !== c.fraseRec) { setErro("Frase de recuperação incorreta."); return; }
+    if (novaSenha.length < 4) { setErro("A nova senha precisa de pelo menos 4 caracteres."); return; }
+    c.senhaHash = hashSenha(novaSenha); gravarContas(contas);
+    window.alert("Senha redefinida! Entre com a nova senha.");
+    setSenha(""); setModo("login");
+  };
+  const google = () => window.alert("Entrar com Google requer um Client ID do Google Cloud (OAuth) e o SHA-1 do APK cadastrados — configuração externa. Por enquanto, use e-mail e senha: seus dados ficam 100% no aparelho.");
+
+  return (
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", padding:"24px 16px" }}>
+      <div style={{ width:"100%", maxWidth:400 }}>
+        <div style={{ textAlign:"center", marginBottom:26 }}>
+          <div style={{ fontSize:44 }}>💼</div>
+          <div style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5 }}>Carteira de Proventos</div>
+          <div style={{ fontSize:12, color:T.textMute, marginTop:4 }}>Seus dividendos, no seu controle — 100% no seu aparelho.</div>
+        </div>
+        <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:"20px" }}>
+          {modo==="login" && (<>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text, marginBottom:14 }}>Entrar</div>
+            <input style={inp} placeholder="E-mail" inputMode="email" autoCapitalize="none" value={email} onChange={e=>setEmail(e.target.value)}/>
+            <input style={inp} placeholder="Senha" type="password" value={senha} onChange={e=>setSenha(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") entrar(); }}/>
+            {erro && <div style={{ fontSize:11, color:T.red, marginBottom:10 }}>⚠️ {erro}</div>}
+            <button style={btnP} onClick={entrar}>Entrar</button>
+            <button onClick={google} style={{ width:"100%", marginTop:10, padding:"12px", borderRadius:10, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:13, fontWeight:600 }}>🔵 Entrar com Google</button>
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop:12 }}>
+              <button style={btnL} onClick={()=>{ setErro(""); setModo("cadastro"); }}>Criar conta</button>
+              <button style={btnL} onClick={()=>{ setErro(""); setModo("recuperar"); }}>Esqueci a senha</button>
+            </div>
+          </>)}
+          {modo==="cadastro" && (<>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text, marginBottom:14 }}>Criar conta</div>
+            <input style={inp} placeholder="Seu nome" value={nome} onChange={e=>setNome(e.target.value)}/>
+            <input style={inp} placeholder="E-mail" inputMode="email" autoCapitalize="none" value={email} onChange={e=>setEmail(e.target.value)}/>
+            <input style={inp} placeholder="Senha" type="password" value={senha} onChange={e=>setSenha(e.target.value)}/>
+            <input style={inp} placeholder="Confirmar senha" type="password" value={senha2} onChange={e=>setSenha2(e.target.value)}/>
+            {erro && <div style={{ fontSize:11, color:T.red, marginBottom:10 }}>⚠️ {erro}</div>}
+            <button style={btnP} onClick={cadastrar}>Criar conta</button>
+            <div style={{ textAlign:"center", marginTop:12 }}><button style={btnL} onClick={()=>{ setErro(""); setModo("login"); }}>← Já tenho conta</button></div>
+          </>)}
+          {modo==="frase" && (<>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text, marginBottom:10 }}>🛟 Guarde sua frase de recuperação</div>
+            <div style={{ fontSize:12, color:T.textMute, lineHeight:1.6, marginBottom:12 }}>Se você esquecer a senha, esta frase é o <strong>único</strong> jeito de recuperar a conta (não enviamos e-mail — tudo fica no aparelho). Anote em lugar seguro:</div>
+            <div style={{ background:T.cardAlt, border:`2px dashed ${T.accent}`, borderRadius:12, padding:"14px", textAlign:"center", fontSize:18, fontWeight:800, color:T.accentSoft, letterSpacing:1, marginBottom:14, userSelect:"all" }}>{fraseGerada}</div>
+            <button style={btnP} onClick={()=>aoEntrar(em)}>✓ Anotei — entrar no app</button>
+          </>)}
+          {modo==="recuperar" && (<>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text, marginBottom:14 }}>Recuperar senha</div>
+            <input style={inp} placeholder="E-mail" inputMode="email" autoCapitalize="none" value={email} onChange={e=>setEmail(e.target.value)}/>
+            <input style={inp} placeholder="Frase de recuperação (ex: sol-rio-lua-123)" value={frase} onChange={e=>setFrase(e.target.value)}/>
+            <input style={inp} placeholder="Nova senha" type="password" value={novaSenha} onChange={e=>setNovaSenha(e.target.value)}/>
+            {erro && <div style={{ fontSize:11, color:T.red, marginBottom:10 }}>⚠️ {erro}</div>}
+            <button style={btnP} onClick={recuperar}>Redefinir senha</button>
+            <div style={{ textAlign:"center", marginTop:12 }}><button style={btnL} onClick={()=>{ setErro(""); setModo("login"); }}>← Voltar ao login</button></div>
+          </>)}
+        </div>
+        <div style={{ fontSize:10, color:T.textFaint, textAlign:"center", marginTop:14, lineHeight:1.6 }}>Contas e dados são armazenados localmente neste aparelho.<br/>Cada conta tem sua própria carteira, metas e preferências.</div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ROOT — controla a sessão; cada conta tem seus próprios dados (PREFIXO próprio)
+// ════════════════════════════════════════════════════════════════════════════
+export default function Root() {
+  const [usuario, setUsuario] = useState(() => {
+    try { const u = localStorage.getItem(SESSAO_KEY); if (u) definirUsuarioAtivo(u); return u || null; } catch { return null; }
+  });
+  const entrar = (email) => { definirUsuarioAtivo(email); try { localStorage.setItem(SESSAO_KEY, email); } catch {} setUsuario(email); };
+  const sair = () => { try { localStorage.removeItem(SESSAO_KEY); } catch {} setUsuario(null); };
+  const contaNome = (() => { try { return lerContas()[usuario]?.nome || ""; } catch { return ""; } })();
+  if (!usuario) return <TelaAuth aoEntrar={entrar}/>;
+  return <AppCarteira key={usuario} usuario={usuario} contaNome={contaNome} onLogout={sair}/>;
 }
