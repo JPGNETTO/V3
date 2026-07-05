@@ -157,3 +157,11 @@ button:active {
 /* Cursor piscando do streaming da IA */
 @keyframes piscar { 0%,50%{opacity:1;} 51%,100%{opacity:0;} }
 .cursor-pisca { animation: piscar 1s step-end infinite; margin-left:1px; font-weight:400; }
+
+/* ── Animações que a IA pode aplicar em elementos (comando "estilo") ── */
+@keyframes iaPulsar { 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.07); } }
+.ia-anim-pulsar { display:inline-block; animation: iaPulsar 1.6s ease-in-out infinite; }
+@keyframes iaBrilhar { 0%,100%{ filter:brightness(1); } 50%{ filter:brightness(1.6); } }
+.ia-anim-brilhar { animation: iaBrilhar 1.8s ease-in-out infinite; }
+@keyframes iaFlutuar { 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-3px); } }
+.ia-anim-flutuar { display:inline-block; animation: iaFlutuar 2s ease-in-out infinite; }
