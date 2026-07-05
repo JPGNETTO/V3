@@ -138,7 +138,48 @@ async function detectarServidor(aoTestar) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// RELATÓRIO PDF — gera um PDF da carteira (patrimônio, proventos, composição)
+// AÇÕES DA IA (Camada 1) — comandos SEGUROS que não quebram a estrutura base.
+// A IA emite [[ACAO]]{"tipo":"tema","valor":"padrao"}[[/ACAO]] e o app aplica
+// numa camada acima (preview → aplicar/cancelar). A base fica sempre intacta.
+// ════════════════════════════════════════════════════════════════════════════
+// Elementos que a IA pode estilizar (whitelist — protege a base do app)
+const ELEMENTOS_ESTILO = {
+  saudacao:                { nome:"Saudação do painel (Boa noite!)" },
+  tituloMetaProventos:     { nome:"Título 'Meta de proventos'" },
+  tituloProx3Meses:        { nome:"Título 'Proventos · 3 meses'" },
+  tituloGraficoMensal:     { nome:"Título 'Proventos mês a mês'" },
+  tituloPrevistoRealizado: { nome:"Título 'Previsto vs Realizado'" },
+  dividendosHeader:        { nome:"Rótulo 'Dividendos — total do ano'" },
+};
+const ANIMACOES_IA = ["nenhuma","pulsar","brilhar","flutuar"];
+
+const ACOES_VALIDAS = {
+  tema:      { label:"Trocar tema" },
+  layout:    { label:"Trocar layout (celular/TV)" },
+  densidade: { label:"Trocar densidade" },
+  fonte:     { label:"Ajustar tamanho da fonte" },
+  meta:      { label:"Definir meta de proventos" },
+  aporte:    { label:"Definir meta de aporte" },
+  navegar:   { label:"Ir para uma tela" },
+  blocoMover:   { label:"Mover bloco de página" },
+  blocoVisivel: { label:"Mostrar/ocultar bloco" },
+  estilo:       { label:"Estilizar elemento (fonte/cor/efeitos)" },
+};
+function detectarAcoes(txt) {
+  const acoes = [];
+  const blocos = String(txt||"").match(/\[\[ACAO\]\][\s\S]*?\[\[\/ACAO\]\]/g) || [];
+  blocos.forEach(b=>{
+    const corpo = b.replace("[[ACAO]]","").replace("[[/ACAO]]","").trim();
+    try { const o = JSON.parse(corpo); if (o && o.tipo && ACOES_VALIDAS[o.tipo]) acoes.push(o); } catch(e){}
+  });
+  return acoes;
+}
+// remove os blocos [[ACAO]] do texto exibido ao usuário (fica limpo no chat)
+function limparAcoesDoTexto(txt) {
+  return String(txt||"").replace(/\[\[ACAO\]\][\s\S]*?\[\[\/ACAO\]\]/g, "").trim();
+}
+
+
 // ════════════════════════════════════════════════════════════════════════════
 function gerarRelatorioPDF({ ativos, metaMensal, custoVida, totalAnual, provEsteMes, mediaMes, patrimonioTotal }) {
   const doc = new jsPDF({ unit:"mm", format:"a4" });
@@ -801,7 +842,78 @@ function DetalheMes({ ativos, idx, filtro, T }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD DA CARTEIRA — composição (pizza) + dinheiro (barras), por grupo
 // ════════════════════════════════════════════════════════════════════════════
-function PainelCarteira({ ativos, historico = [], proventosRecebidos, T }) {
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCOS CONFIGURÁVEIS (Camada 2) — componentes que podem mudar de página/ordem
+// ════════════════════════════════════════════════════════════════════════════
+function BlocoProx3Meses({ ativos, estiloDe = () => ({ style:{}, cls:"" }), T }) {
+  const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const hoje = new Date();
+  const mAtual = hoje.getMonth()+1;
+  const prox = (n) => ((mAtual-1+n)%12)+1;
+  const provDoMes = (m) => ativos
+    .filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m))
+    .map(a=>({ ticker:a.ticker, valor:+(a.prov*a.qtd).toFixed(2) }))
+    .sort((x,y)=>y.valor-x.valor);
+  const meses = [
+    { rotulo:"📥 Este mês",     m:mAtual,  cor:T.green },
+    { rotulo:"📅 Próximo mês",  m:prox(1), cor:T.accentSoft },
+    { rotulo:"🗓️ Mês seguinte", m:prox(2), cor:T.cyan },
+  ].map(x=>{ const lista = provDoMes(x.m); return { ...x, total:lista.reduce((s,p)=>s+p.valor,0), n:lista.length }; });
+  return (
+    <div style={{ marginBottom:18 }}>
+      <div className={estiloDe("tituloProx3Meses",11).cls} style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:10, ...estiloDe("tituloProx3Meses",11).style }}>📆 Proventos a receber · próximos 3 meses</div>
+      <div style={{ display:"flex", gap:10, overflowX:"auto", paddingBottom:4, scrollSnapType:"x mandatory" }}>
+        {meses.map((mes,i)=>(
+          <div key={i} style={{ flex:"0 0 auto", width:"46%", minWidth:150, scrollSnapAlign:"start",
+            background:`linear-gradient(135deg, ${mes.cor}22, ${T.card})`, border:`1px solid ${mes.cor}44`, borderRadius:14, padding:"15px 15px 16px" }}>
+            <div style={{ fontSize:9, color:mes.cor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>{mes.rotulo}</div>
+            <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mes.m-1]}</div>
+            <div style={{ fontSize:22, fontWeight:800, color:mes.cor, letterSpacing:-0.5 }}>{fmt(mes.total)}</div>
+            <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{mes.n} ativo{mes.n!==1?"s":""} pagando</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BlocoGraficoMensal({ ativos, estiloDe = () => ({ style:{}, cls:"" }), T }) {
+  const dataMes = MESES_BASE.map((label,idx)=>({
+    mes: label.slice(0,3),
+    total: +ativos.filter(a=>a.qtd>0 && mesesIdx(a.meses).includes(idx)).reduce((s,a)=>s+a.prov*a.qtd,0).toFixed(2)
+  }));
+  const temDados = dataMes.some(d=>d.total>0);
+  if (!temDados) return null;
+  return (
+    <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 8px", marginBottom:16 }}>
+      <div className={estiloDe("tituloGraficoMensal",11).cls} style={{ paddingLeft:8, marginBottom:8, fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1, ...estiloDe("tituloGraficoMensal",11).style }}>💵 Proventos mês a mês</div>
+      <div style={{ width:"100%", height:150 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={dataMes} margin={{ top:4,right:8,left:0,bottom:0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
+            <XAxis dataKey="mes" tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} interval={0}/>
+            <YAxis tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} width={38} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${Math.round(v)}`}/>
+            <Tooltip formatter={(v)=>fmt(v)} contentStyle={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:8, fontSize:12 }} cursor={{ fill:`${T.accent}11` }}/>
+            <Bar dataKey="total" radius={[4,4,0,0]} fill={T.cyan}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div style={{ fontSize:9, color:T.textFaint, padding:"4px 10px 0" }}>Visão completa e detalhada na tela 🔬 Análises.</div>
+    </div>
+  );
+}
+
+// Registro dos blocos móveis: id, nome, página padrão e ordem padrão.
+// A base do app usa SEMPRE este padrão se a configuração estiver vazia/quebrada.
+const BLOCOS_PAGINAS = ["painel","analises","calendario","ranking","custovida"];
+const BLOCOS_DEF = [
+  { id:"prox3meses",       nome:"Proventos · 3 meses",    emoji:"📆", paginaPadrao:"painel", ordemPadrao:1 },
+  { id:"graficoMensal",    nome:"Proventos mês a mês",    emoji:"💵", paginaPadrao:"painel", ordemPadrao:2 },
+  { id:"projecao",         nome:"Projeção + contribuição",emoji:"🔮", paginaPadrao:"painel", ordemPadrao:3 },
+  { id:"previstoRealizado",nome:"Previsto vs Realizado",  emoji:"⚖️", paginaPadrao:"painel", ordemPadrao:4 },
+];
+
+function PainelCarteira({ ativos, historico = [], proventosRecebidos, blocosRender, estiloDe = () => ({ style:{}, cls:"" }), T }) {
   const [agrupar, setAgrupar] = useState("cat");   // "cat" | "setor"
   const [metrica, setMetrica] = useState("atual"); // "atual" | "investido"
   const [filtroCat, setFiltroCat] = useState("TUDO"); // "TUDO" | "FII" | "Ação" | "Cripto"
@@ -889,7 +1001,7 @@ function PainelCarteira({ ativos, historico = [], proventosRecebidos, T }) {
         return (
           <div style={{ marginBottom:20, marginTop:8 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:14 }}>
-              <span style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5 }}>{saud}! 👋</span>
+              <span className={estiloDe("saudacao",24).cls} style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5, ...estiloDe("saudacao",24).style }}>{saud}! 👋</span>
               <span style={{ fontSize:12, color:T.textFaint }}>{dataFmt}</span>
             </div>
             <div style={{ background:`linear-gradient(135deg, ${T.amber}1c, ${T.card})`, border:`1px solid ${T.amber}44`, borderRadius:12, padding:"11px 13px", display:"flex", alignItems:"center", gap:10 }}>
@@ -929,77 +1041,16 @@ function PainelCarteira({ ativos, historico = [], proventosRecebidos, T }) {
         })}
       </div>
 
-      {/* ═══ VISTA: PROVENTOS (próximos pagamentos + gráfico mês a mês) ═══ */}
+      {/* ═══ VISTA: PROVENTOS — blocos configuráveis (Camada 2) ═══ */}
       {vista==="proventos" && (<>
-      {/* PROJEÇÃO DE PROVENTOS DO PRÓXIMO MÊS */}
-      {/* PROVENTOS A RECEBER — carrossel de 3 meses (este, próximo, seguinte) */}
-      {(() => {
-        const NOMES_MES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
-        const hoje = new Date();
-        const mAtual = hoje.getMonth()+1; // 1-12
-        const prox = (n) => ((mAtual-1+n)%12)+1; // mês N meses à frente (1-12)
-        const provDoMes = (m) => ativos
-          .filter(a=>a.qtd>0 && a.prov>0 && a.meses.includes(m))
-          .map(a=>({ ticker:a.ticker, valor:+(a.prov*a.qtd).toFixed(2) }))
-          .sort((x,y)=>y.valor-x.valor);
-        const meses = [
-          { rotulo:"📥 Este mês",      m:mAtual,   cor:T.green,      destaque:true },
-          { rotulo:"📅 Próximo mês",   m:prox(1),  cor:T.accentSoft, destaque:false },
-          { rotulo:"🗓️ Mês seguinte",  m:prox(2),  cor:T.cyan,       destaque:false },
-        ].map(x=>{
-          const lista = provDoMes(x.m);
-          return { ...x, total:lista.reduce((s,p)=>s+p.valor,0), n:lista.length };
-        });
-        return (
-          <div style={{ marginBottom:18 }}>
-            <div style={{ fontSize:11, color:T.textMute, fontWeight:600, marginBottom:10 }}>📆 Proventos a receber · próximos 3 meses</div>
-            <div style={{ display:"flex", gap:10, overflowX:"auto", paddingBottom:4, scrollSnapType:"x mandatory" }}>
-              {meses.map((mes,i)=>(
-                <div key={i} style={{ flex:"0 0 auto", width:"46%", minWidth:150, scrollSnapAlign:"start",
-                  background:`linear-gradient(135deg, ${mes.cor}22, ${T.card})`, border:`1px solid ${mes.cor}44`, borderRadius:14, padding:"15px 15px 16px" }}>
-                  <div style={{ fontSize:9, color:mes.cor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 }}>{mes.rotulo}</div>
-                  <div style={{ fontSize:10, color:T.textFaint, marginBottom:8 }}>{NOMES_MES[mes.m-1]}</div>
-                  <div style={{ fontSize:22, fontWeight:800, color:mes.cor, letterSpacing:-0.5 }}>{fmt(mes.total)}</div>
-                  <div style={{ fontSize:9, color:T.textMute, marginTop:5 }}>{mes.n} ativo{mes.n!==1?"s":""} pagando</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* PROVENTOS MÊS A MÊS — gráfico compacto no contexto da home */}
-      {(() => {
-        const dataMes = MESES_BASE.map((label,idx)=>({
-          mes: label.slice(0,3),
-          total: +ativos.filter(a=>a.qtd>0 && mesesIdx(a.meses).includes(idx)).reduce((s,a)=>s+a.prov*a.qtd,0).toFixed(2)
-        }));
-        const temDados = dataMes.some(d=>d.total>0);
-        if (!temDados) return null;
-        return (
-          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"14px 6px 8px", marginBottom:16 }}>
-            <div style={{ paddingLeft:8, marginBottom:8, fontSize:11, color:T.textMute, textTransform:"uppercase", letterSpacing:1 }}>💵 Proventos mês a mês</div>
-            <div style={{ width:"100%", height:150 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dataMes} margin={{ top:4,right:8,left:0,bottom:0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
-                  <XAxis dataKey="mes" tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} interval={0}/>
-                  <YAxis tick={{ fontSize:8,fill:T.textMute }} axisLine={false} tickLine={false} width={38} tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}k`:`${Math.round(v)}`}/>
-                  <Tooltip formatter={(v)=>fmt(v)} contentStyle={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:8, fontSize:12 }} cursor={{ fill:`${T.accent}11` }}/>
-                  <Bar dataKey="total" radius={[4,4,0,0]} fill={T.cyan}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ fontSize:9, color:T.textFaint, padding:"4px 10px 0" }}>Visão completa e detalhada na tela 🔬 Análises.</div>
-          </div>
-        );
-      })()}
-
-      {/* PROJEÇÃO + CONTRIBUIÇÃO POR ATIVO */}
-      <ProjecaoProventos ativos={ativos} T={T}/>
-
-      {/* PREVISTO vs REALIZADO no ano */}
-      <PrevistoVsRealizado ativos={ativos} proventosRecebidos={proventosRecebidos} T={T}/>
+      {blocosRender
+        ? blocosRender
+        : (<>{/* fallback: ordem padrão da instalação (base intacta) */}
+          <BlocoProx3Meses ativos={ativos} estiloDe={estiloDe} T={T}/>
+          <BlocoGraficoMensal ativos={ativos} estiloDe={estiloDe} T={T}/>
+          <ProjecaoProventos ativos={ativos} T={T}/>
+          <PrevistoVsRealizado ativos={ativos} proventosRecebidos={proventosRecebidos} estiloDe={estiloDe} T={T}/>
+        </>)}
       </>)}
 
       {/* ═══ VISTA: RESUMO (patrimônio total + médias) ═══ */}
@@ -1510,7 +1561,7 @@ function TelaReservaPlus({ ativos, onClose, T }) {
 // PREVISTO vs REALIZADO — compara o provento previsto com o recebido de fato
 // "Realizado" vem das linhas de Rendimento/Dividendo/JCP da planilha da B3.
 // ════════════════════════════════════════════════════════════════════════════
-function PrevistoVsRealizado({ ativos, proventosRecebidos, T }) {
+function PrevistoVsRealizado({ ativos, proventosRecebidos, estiloDe = () => ({ style:{}, cls:"" }), T }) {
   const ano = new Date().getFullYear();
   const mesAtual = new Date().getMonth(); // 0-11
   const NOMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -1530,7 +1581,7 @@ function PrevistoVsRealizado({ ativos, proventosRecebidos, T }) {
   if (!temRealizado) {
     return (
       <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:18 }}>
-        <div style={{ fontSize:13, fontWeight:800, color:T.text, marginBottom:6 }}>📊 Previsto vs Realizado</div>
+        <div className={estiloDe("tituloPrevistoRealizado",13).cls} style={{ fontSize:13, fontWeight:800, color:T.text, marginBottom:6, ...estiloDe("tituloPrevistoRealizado",13).style }}>📊 Previsto vs Realizado</div>
         <div style={{ fontSize:11, color:T.textMute, lineHeight:1.5 }}>
           Para ver quanto você <strong>realmente recebeu</strong> de proventos vs o previsto, importe a planilha de Movimentação da B3 (ela tem as linhas de Rendimento/Dividendo/JCP). Vá em <strong>Importar em massa → Arquivo da B3</strong>.
         </div>
@@ -1544,7 +1595,7 @@ function PrevistoVsRealizado({ ativos, proventosRecebidos, T }) {
   return (
     <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:14, padding:"16px", marginBottom:18 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:4 }}>
-        <span style={{ fontSize:13, fontWeight:800, color:T.text }}>📊 Previsto vs Realizado · {ano}</span>
+        <span className={estiloDe("tituloPrevistoRealizado",13).cls} style={{ fontSize:13, fontWeight:800, color:T.text, ...estiloDe("tituloPrevistoRealizado",13).style }}>📊 Previsto vs Realizado · {ano}</span>
       </div>
       <div style={{ fontSize:10, color:T.textFaint, marginBottom:12 }}>Realizado = proventos recebidos de fato (da planilha B3)</div>
 
@@ -3326,7 +3377,7 @@ function TrilhaMetas({ valorAtual, metaMensal, compacto=false, onConfigurar, onA
     return (
       <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"11px 13px" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🎯 Meta de proventos</span>
+          <span className={estiloDe("tituloMetaProventos",13).cls} style={{ fontSize:13, fontWeight:800, color:T.text, ...estiloDe("tituloMetaProventos",13).style }}>🎯 Meta de proventos</span>
         </div>
         <div style={{ display:"flex", alignItems:"baseline", gap:5, marginTop:8 }}>
           <span style={{ fontSize:15, fontWeight:800, color:metaBatida?T.green:T.accentSoft }}>{fmt(valorAtual)}</span>
@@ -3343,7 +3394,7 @@ function TrilhaMetas({ valorAtual, metaMensal, compacto=false, onConfigurar, onA
     <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"13px" }}>
       {/* cabeçalho: título + ver análise */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-        <span style={{ fontSize:13, fontWeight:800, color:T.text }}>🎯 Meta de proventos</span>
+        <span className={estiloDe("tituloMetaProventos",13).cls} style={{ fontSize:13, fontWeight:800, color:T.text, ...estiloDe("tituloMetaProventos",13).style }}>🎯 Meta de proventos</span>
         <button onClick={stop(onAbrirAnalises)} style={{ fontSize:10, fontWeight:700, color:T.accentSoft, background:T.accentBg, border:`1px solid ${T.accentBorder}55`, borderRadius:7, padding:"5px 10px", cursor:"pointer" }}>ver análise ›</button>
       </div>
       {/* níveis de meta — alternam ao vivo */}
@@ -3492,7 +3543,7 @@ function TrilhaMetas({ valorAtual, metaMensal, compacto=false, onConfigurar, onA
 // ════════════════════════════════════════════════════════════════════════════
 const ETFS_GLOBAIS = ["VWRA11","IVVB11","NASD11","XINA11","BNDX11","WRLD11"];
 
-function CarrosselMetas({ ativos, mediaMes, metaMensal, metaAporte=0, aporteEsteMes=0, custoVida={}, onConfigurar, onConfigAporte, onAbrirAnalises, onAbrirContas, onAbrirReserva, T }) {
+function CarrosselMetas({ ativos, mediaMes, metaMensal, metaAporte=0, aporteEsteMes=0, custoVida={}, onConfigurar, onConfigAporte, onAbrirAnalises, onAbrirContas, onAbrirReserva, estiloDe = () => ({ style:{}, cls:"" }), T }) {
   // ── CONTAS A PAGAR (dados reais da página Custo de Vida) ──
   const contasLista = CUSTOS_DEF.map(c=>({ ...c, valor:+custoVida[c.id]||0 })).filter(c=>c.valor>0).sort((a,b)=>a.valor-b.valor);
   const custoTotal = contasLista.reduce((s,c)=>s+c.valor,0);
@@ -4038,10 +4089,143 @@ function CartaoCredito({ ativos, mediaMes, custoVida, setCustoVida, fundosProvis
 // ════════════════════════════════════════════════════════════════════════════
 // CHATBOT — assistente conectado à IA local (via AI Bridge na rede Tailscale)
 // ════════════════════════════════════════════════════════════════════════════
-function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, T }) {
+// ════════════════════════════════════════════════════════════════════════════
+// CHAT — ANEXO DE ARQUIVO (📎) + DITADO POR VOZ (🎤)
+// ════════════════════════════════════════════════════════════════════════════
+// Lê o arquivo anexado e devolve texto (xlsx vira CSV; demais lidos como texto)
+function lerAnexoArquivo(file) {
+  return new Promise((resolve, reject) => {
+    const ext = String(file.name.split(".").pop()||"").toLowerCase();
+    const r = new FileReader();
+    if (["xlsx","xls"].includes(ext)) {
+      r.onload = (e) => { try {
+        const wb = XLSX.read(e.target.result, { type:"array" });
+        let out = "";
+        wb.SheetNames.slice(0,3).forEach(n=>{ out += `\n[Aba: ${n}]\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n]).slice(0,6000); });
+        resolve(out.trim());
+      } catch(err){ reject(err); } };
+      r.onerror = reject; r.readAsArrayBuffer(file);
+    } else {
+      r.onload = (e) => resolve(String(e.target.result||""));
+      r.onerror = reject; r.readAsText(file);
+    }
+  });
+}
+
+// 📎 Anexar arquivo no chat da IA (txt, md, csv, json, xlsx)
+function AnexoChat({ anexo, setAnexo, T }) {
+  const ref = useRef(null);
+  return (<>
+    <button onClick={()=>ref.current?.click()} title="Anexar arquivo"
+      style={{ width:44, borderRadius:12, border:`1px solid ${anexo?T.accent:T.borderSoft}`, background: anexo?`${T.accent}22`:T.cardAlt, color: anexo?T.accent:T.textMute, cursor:"pointer", fontSize:16 }}>📎</button>
+    <input ref={ref} type="file" accept=".txt,.md,.csv,.json,.xlsx,.xls" style={{ display:"none" }} onChange={async e=>{
+      const f = e.target.files?.[0]; e.target.value="";
+      if (!f) return;
+      if (f.size > 2*1024*1024) { window.alert("Arquivo muito grande (máximo 2MB)."); return; }
+      try {
+        let txt = await lerAnexoArquivo(f);
+        let truncado = false;
+        if (txt.length > 8000) { txt = txt.slice(0,8000); truncado = true; }
+        setAnexo({ nome:f.name, conteudo:txt, truncado });
+        registrarLog("chat", `Arquivo anexado: ${f.name}`, { direcao:"interno", origem:"app" });
+      } catch(err){ window.alert("Não consegui ler este arquivo. Formatos aceitos: txt, md, csv, json, xlsx."); }
+    }}/>
+  </>);
+}
+
+// 🎤 Ditado por voz → texto no campo do chat.
+// No APK usa o reconhecimento nativo do Android (plugin Capacitor); no navegador, a Web Speech API.
+function BotaoAudioChat({ textoAtual, setTexto, T }) {
+  const [gravando, setGravando] = useState(false);
+  const recRef = useRef(null);
+  const baseRef = useRef("");
+  const aplicar = (t) => setTexto((baseRef.current ? baseRef.current.trim()+" " : "") + t);
+  const toggle = async () => {
+    if (gravando) {
+      if (window.Capacitor?.isNativePlatform?.()) { try { const m = await import("@capacitor-community/speech-recognition"); await m.SpeechRecognition.stop(); } catch {} }
+      else { try { recRef.current?.stop(); } catch {} }
+      setGravando(false); return;
+    }
+    baseRef.current = textoAtual || "";
+    if (window.Capacitor?.isNativePlatform?.()) {
+      try {
+        const m = await import("@capacitor-community/speech-recognition");
+        const disp = await m.SpeechRecognition.available();
+        if (!disp?.available) { window.alert("Reconhecimento de voz indisponível neste aparelho."); return; }
+        await m.SpeechRecognition.requestPermissions();
+        await m.SpeechRecognition.removeAllListeners();
+        m.SpeechRecognition.addListener("partialResults", (data)=>{ const t = data?.matches?.[0]; if (t) aplicar(t); });
+        setGravando(true);
+        await m.SpeechRecognition.start({ language:"pt-BR", maxResults:1, partialResults:true, popup:false });
+        setGravando(false);
+      } catch(e){ setGravando(false); window.alert("Erro no microfone: "+(e?.message||e)); }
+    } else {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { window.alert("Ditado não suportado neste navegador. No APK do app funciona com o reconhecimento nativo do Android."); return; }
+      const rec = new SR(); recRef.current = rec;
+      rec.lang = "pt-BR"; rec.interimResults = true; rec.continuous = false;
+      rec.onresult = (ev) => { let t=""; for (const r of ev.results) t += r[0].transcript; aplicar(t); };
+      rec.onend = () => setGravando(false);
+      rec.onerror = () => setGravando(false);
+      setGravando(true); rec.start();
+    }
+  };
+  return (
+    <button onClick={toggle} title={gravando?"Parar gravação":"Falar (ditado por voz)"} className={gravando?"ia-anim-pulsar":""}
+      style={{ width:44, borderRadius:12, border:`1px solid ${gravando?T.red:T.borderSoft}`, background: gravando?`${T.red}22`:T.cardAlt, color: gravando?T.red:T.textMute, cursor:"pointer", fontSize:16 }}>
+      {gravando?"⏺":"🎤"}
+    </button>
+  );
+}
+
+// 🔊 Ouvir a resposta da IA em voz alta (text-to-speech).
+// No APK usa a voz nativa do Android (plugin); no navegador, a SpeechSynthesis do Chrome.
+function BotaoOuvirResposta({ texto, T }) {
+  const [falando, setFalando] = useState(false);
+  const limparParaFala = (t) => String(t||"")
+    .replace(/\[\[THINK\]\][\s\S]*?\[\[\/THINK\]\]/g, "")
+    .replace(/[*#`_>|]/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "")
+    .replace(/\s+/g, " ").trim();
+  const toggle = async () => {
+    const t = limparParaFala(texto);
+    if (!t) return;
+    if (falando) {
+      if (window.Capacitor?.isNativePlatform?.()) { try { const m = await import("@capacitor-community/text-to-speech"); await m.TextToSpeech.stop(); } catch {} }
+      else { try { window.speechSynthesis?.cancel(); } catch {} }
+      setFalando(false); return;
+    }
+    if (window.Capacitor?.isNativePlatform?.()) {
+      try {
+        const m = await import("@capacitor-community/text-to-speech");
+        setFalando(true);
+        await m.TextToSpeech.speak({ text:t, lang:"pt-BR", rate:1.0, pitch:1.0, volume:1.0 });
+        setFalando(false);
+      } catch(e){ setFalando(false); window.alert("Não consegui reproduzir a voz neste aparelho."); }
+    } else {
+      const synth = window.speechSynthesis;
+      if (!synth) { window.alert("Leitura em voz não suportada neste navegador. No APK funciona com a voz do Android."); return; }
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(t);
+      u.lang = "pt-BR"; u.rate = 1.0;
+      u.onend = () => setFalando(false);
+      u.onerror = () => setFalando(false);
+      setFalando(true); synth.speak(u);
+    }
+  };
+  return (
+    <button onClick={toggle} title={falando?"Parar leitura":"Ouvir resposta"} className={falando?"ia-anim-pulsar":""}
+      style={{ marginTop:8, display:"inline-flex", alignItems:"center", gap:5, padding:"5px 10px", borderRadius:8, border:`1px solid ${falando?T.red+"66":T.border}`, background: falando?`${T.red}14`:T.cardAlt, color: falando?T.red:T.textMute, cursor:"pointer", fontSize:11, fontWeight:600 }}>
+      {falando?"⏹ Parar":"🔊 Ouvir"}
+    </button>
+  );
+}
+
+function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes, onAplicarAcoes, T }) {
   const [mensagens, setMensagens] = useState([]);
   const [input, setInput] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [anexo, setAnexo] = useState(null); // {nome, conteudo, truncado}
   const [statusPC, setStatusPC] = useState("checando"); // checando | online | offline
   const fimRef = useRef(null);
 
@@ -4073,14 +4257,19 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, T }) {
 
   const enviar = async () => {
     const texto = input.trim();
-    if (!texto || carregando) return;
+    if ((!texto && !anexo) || carregando) return;
     setInput("");
-    const baseHist = mensagens.slice(-8);
-    setMensagens(m=>[...m, { role:"user", content:texto }]);
+    const baseHist = mensagens.slice(-8).map(m=>({ role:m.role, content: m.contentServidor || m.content }));
+    // se há anexo, o conteúdo vai embutido na mensagem para o modelo ler
+    const mensagemServidor = anexo
+      ? `[ARQUIVO ANEXADO: ${anexo.nome}${anexo.truncado?" (truncado)":""}]\n${anexo.conteudo}\n[/ARQUIVO]\n\n${texto || "Analise o arquivo anexado e resuma os pontos importantes."}`
+      : texto;
+    setMensagens(m=>[...m, { role:"user", content: texto || `Analise o arquivo ${anexo?.nome}`, contentServidor: mensagemServidor, anexoNome: anexo?.nome }]);
+    setAnexo(null);
     setCarregando(true);
     const carteira = resumoCarteira();
-    registrarLog("chat", `Pergunta enviada: "${texto.slice(0,60)}"`, { direcao:"ida", origem:"servidor", detalhe:{ contextoEnviado:{ totalPatrimonio:carteira.totalPatrimonio, proventoAnual:carteira.proventoAnual, qtdAtivos:carteira.ativos.length } } });
-    const corpo = JSON.stringify({ mensagem: texto, historico: baseHist, carteira });
+    registrarLog("chat", `Pergunta enviada: "${(texto || "[arquivo anexado]").slice(0,60)}"`, { direcao:"ida", origem:"servidor", detalhe:{ contextoEnviado:{ totalPatrimonio:carteira.totalPatrimonio, proventoAnual:carteira.proventoAnual, qtdAtivos:carteira.ativos.length } } });
+    const corpo = JSON.stringify({ mensagem: mensagemServidor, historico: baseHist, carteira });
     const inicio = Date.now();
 
     // separa o raciocínio [[THINK]]...[[/THINK]] do texto da resposta
@@ -4241,6 +4430,8 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, T }) {
           mensagens.map((m,i)=>{
             const eu = m.role==="user";
             const edicoes = !eu && !m.erro && !m.streaming ? detectarEdicoes(m.content) : [];
+            const acoes = !eu && !m.erro && !m.streaming ? detectarAcoes(m.content) : [];
+            const textoLimpo = (!eu && acoes.length>0) ? limparAcoesDoTexto(m.content) : m.content;
             return (
               <div key={i} style={{ display:"flex", justifyContent:eu?"flex-end":"flex-start", marginBottom:10 }}>
                 <div style={{ maxWidth:"85%", background: eu?T.accent:(m.erro?`${T.red}14`:T.card), border:`1px solid ${eu?T.accent:(m.erro?T.red+"44":T.border)}`, borderRadius:14, padding:"10px 13px" }}>
@@ -4253,10 +4444,29 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, T }) {
                       <div style={{ fontSize:11, color:T.textMute, lineHeight:1.5, whiteSpace:"pre-wrap", marginTop:5, paddingLeft:8, borderLeft:`2px solid ${T.border}`, fontStyle:"italic" }}>{m.reasoning}</div>
                     </details>
                   )}
-                  {m.content && <div style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap" }}>{m.content}{m.streaming && <span className="cursor-pisca">▋</span>}</div>}
+                  {eu && m.anexoNome && (
+                    <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#ffffff22", border:"1px solid #ffffff44", borderRadius:8, padding:"4px 8px", marginBottom:6, fontSize:11, color:"#fff" }}>📎 {m.anexoNome}</div>
+                  )}
+                  {textoLimpo && <div style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap" }}>{textoLimpo}{m.streaming && <span className="cursor-pisca">▋</span>}</div>}
+                  {!eu && !m.streaming && !m.erro && textoLimpo && <div><BotaoOuvirResposta texto={textoLimpo} T={T}/></div>}
+                  {/* AÇÕES DE CONFIGURAÇÃO sugeridas pela IA — visualizar (preview) ou aplicar */}
+                  {acoes.length>0 && (
+                    <div style={{ marginTop:10, padding:"10px", background:T.accentBg, border:`1px solid ${T.accentBorder}66`, borderRadius:10 }}>
+                      <div style={{ fontSize:10, color:T.accentSoft, fontWeight:700, marginBottom:6 }}>⚙️ {acoes.length} alteração(ões) no app sugerida(s):</div>
+                      {acoes.map((a,idx)=>(
+                        <div key={idx} style={{ fontSize:11, color:T.textDim, marginBottom:2 }}>• {ACOES_VALIDAS[a.tipo]?.label || a.tipo}: <strong>{String(a.valor)}</strong></div>
+                      ))}
+                      <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                        <button onClick={()=>onVisualizarAcoes && onVisualizarAcoes(acoes)} style={{ flex:1, padding:"9px", borderRadius:8, border:`1px solid ${T.accent}`, background:"transparent", color:T.accent, cursor:"pointer", fontSize:12, fontWeight:700 }}>👁️ Visualizar</button>
+                        <button onClick={()=>onAplicarAcoes && onAplicarAcoes(acoes)} style={{ flex:1, padding:"9px", borderRadius:8, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>✓ Aplicar</button>
+                      </div>
+                    </div>
+                  )}
                   {/* se o assistente sugeriu edições de ativos, oferece aplicar */}
                   {edicoes.length>0 && (
                     <button onClick={()=>{
+                      // backup dos dados ANTES de a IA alterar (permite desfazer em Configurações)
+                      try { localStorage.setItem(PREFIXO+"backupDados", JSON.stringify({ ativos, quando:new Date().toISOString(), origem:"edicao IA" })); } catch {}
                       registrarLog("edicao", `IA aplicou ${edicoes.length} alteração(ões)`, { direcao:"interno", origem:"app", detalhe: edicoes.map(i=>`${i.ticker} qtd=${i.qtd} pm=${i.precoMedio}`).join("; ") });
                       setAtivos(prev=>{
                         const mapa={}; prev.forEach(a=>mapa[a.ticker]={...a});
@@ -4290,12 +4500,22 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, T }) {
         <div ref={fimRef}/>
       </div>
 
+      {/* anexo selecionado (chip acima da caixa) */}
+      {anexo && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, background:T.card, border:`1px solid ${T.accentBorder}`, borderRadius:10, padding:"7px 10px", marginBottom:8 }}>
+          <span style={{ fontSize:13 }}>📎</span>
+          <span style={{ flex:1, fontSize:11, color:T.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{anexo.nome}{anexo.truncado && <span style={{ color:T.amber }}> · grande — enviarei um trecho</span>}</span>
+          <button onClick={()=>setAnexo(null)} style={{ width:24, height:24, borderRadius:6, border:"none", background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11 }}>✕</button>
+        </div>
+      )}
       {/* caixa de envio */}
       <div style={{ display:"flex", gap:8, position:"sticky", bottom:8 }}>
+        <AnexoChat anexo={anexo} setAnexo={setAnexo} T={T}/>
+        <BotaoAudioChat textoAtual={input} setTexto={setInput} T={T}/>
         <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") enviar(); }}
-          placeholder="Pergunte sobre sua carteira..."
-          style={{ flex:1, background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:12, color:T.text, padding:"12px 14px", fontSize:14, outline:"none" }}/>
-        <button onClick={enviar} disabled={carregando||!input.trim()} style={{ width:48, borderRadius:12, border:"none", background: input.trim()&&!carregando?T.accent:T.border, color:"#fff", cursor: input.trim()&&!carregando?"pointer":"default", fontSize:18 }}>↑</button>
+          placeholder="Pergunte, fale 🎤 ou anexe 📎..."
+          style={{ flex:1, minWidth:0, background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:12, color:T.text, padding:"12px 14px", fontSize:14, outline:"none" }}/>
+        <button onClick={enviar} disabled={carregando||(!input.trim()&&!anexo)} style={{ width:48, borderRadius:12, border:"none", background: (input.trim()||anexo)&&!carregando?T.accent:T.border, color:"#fff", cursor: (input.trim()||anexo)&&!carregando?"pointer":"default", fontSize:18 }}>↑</button>
       </div>
     </div>
   );
@@ -4419,14 +4639,87 @@ function VisualizadorLogs({ onClose, T }) {
   );
 }
 
-function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onLimparDados, onExportar, onImportar, onExportarPDF, onClose }) {
-  const [showLogs, setShowLogs] = useState(false);
-  const Secao = ({ titulo, children }) => (
-    <div style={{ marginBottom:20 }}>
-      <div style={{ fontSize:11,color:T.textMute,textTransform:"uppercase",letterSpacing:1,marginBottom:10,fontWeight:700 }}>{titulo}</div>
-      {children}
+// ════════════════════════════════════════════════════════════════════════════
+// ORGANIZAR BLOCOS — controles manuais da Camada 2 (mover/ordenar/ocultar)
+// A base nunca muda: "Restaurar padrão" volta tudo à instalação original.
+// ════════════════════════════════════════════════════════════════════════════
+function OrganizarBlocos({ layoutBlocos, setLayoutBlocos, onClose, T }) {
+  const PAGINAS = [
+    { id:"painel",     lb:"🏠 Painel" },
+    { id:"analises",   lb:"🔬 Análises" },
+    { id:"calendario", lb:"📅 Agenda" },
+    { id:"ranking",    lb:"🏆 Ranking" },
+    { id:"custovida",  lb:"🧾 Custo" },
+  ];
+  const cfg = (id) => {
+    const def = BLOCOS_DEF.find(b=>b.id===id) || {};
+    const c = (layoutBlocos||{})[id] || {};
+    return { pagina: BLOCOS_PAGINAS.includes(c.pagina)?c.pagina:def.paginaPadrao, ordem: c.ordem??def.ordemPadrao, visivel: c.visivel!==false };
+  };
+  const setCfg = (id, patch) => setLayoutBlocos(prev=>({ ...(prev||{}), [id]: { ...cfg(id), ...patch } }));
+  const mover = (id, dir) => {
+    const c = cfg(id);
+    const daPagina = BLOCOS_DEF.map(b=>({ ...b, ...cfg(b.id) })).filter(b=>b.pagina===c.pagina).sort((a,b)=>a.ordem-b.ordem);
+    const idx = daPagina.findIndex(b=>b.id===id);
+    const alvo = daPagina[idx+dir];
+    if (!alvo) return;
+    setLayoutBlocos(prev=>({ ...(prev||{}), [id]:{ ...c, ordem:alvo.ordem }, [alvo.id]:{ ...cfg(alvo.id), ordem:c.ordem } }));
+  };
+  const btn = (extra={}) => ({ width:30, height:30, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:13, display:"flex", alignItems:"center", justifyContent:"center", ...extra });
+
+  return (
+    <div onClick={onClose} className="modal-overlay" style={{ position:"fixed", inset:0, background:"#000b", zIndex:1450, display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"20px 12px", overflowY:"auto" }}>
+      <div onClick={e=>e.stopPropagation()} className="modal-content" style={{ background:T.bg, border:`1px solid ${T.borderSoft}`, borderRadius:16, width:"100%", maxWidth:460, padding:"20px", boxShadow:"0 20px 60px #000c" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <div style={{ fontSize:18, fontWeight:800, color:T.text }}>🧩 Organizar blocos</div>
+          <button onClick={onClose} style={{ width:34, height:34, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:16 }}>✕</button>
+        </div>
+        <div style={{ fontSize:10, color:T.textFaint, marginBottom:14, lineHeight:1.5 }}>
+          Mova blocos entre páginas, mude a ordem (↑ ↓) ou oculte (👁). A instalação padrão fica intacta — "Restaurar padrão" desfaz tudo.
+        </div>
+
+        {PAGINAS.map(pg=>{
+          const lista = BLOCOS_DEF.map(b=>({ ...b, ...cfg(b.id) })).filter(b=>b.pagina===pg.id).sort((a,b)=>a.ordem-b.ordem);
+          if (!lista.length) return null;
+          return (
+            <div key={pg.id} style={{ marginBottom:14 }}>
+              <div style={{ fontSize:10, color:T.textMute, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, marginBottom:6 }}>{pg.lb}</div>
+              {lista.map((b,i)=>(
+                <div key={b.id} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:11, padding:"10px 11px", marginBottom:6, opacity:b.visivel?1:0.55 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:15 }}>{b.emoji}</span>
+                    <span style={{ flex:1, fontSize:12, fontWeight:700, color:T.text, minWidth:0, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{b.nome}</span>
+                    <button onClick={()=>mover(b.id,-1)} disabled={i===0} style={btn({ opacity:i===0?0.35:1 })}>↑</button>
+                    <button onClick={()=>mover(b.id,1)} disabled={i===lista.length-1} style={btn({ opacity:i===lista.length-1?0.35:1 })}>↓</button>
+                    <button onClick={()=>setCfg(b.id,{ visivel:!b.visivel })} title={b.visivel?"Ocultar":"Mostrar"} style={btn()}>{b.visivel?"👁":"🚫"}</button>
+                  </div>
+                  {/* escolher a página do bloco */}
+                  <div style={{ display:"flex", gap:5, marginTop:8, flexWrap:"wrap" }}>
+                    {PAGINAS.map(p2=>(
+                      <button key={p2.id} onClick={()=>setCfg(b.id,{ pagina:p2.id })} style={{ padding:"5px 9px", borderRadius:7, border:`1px solid ${b.pagina===p2.id?T.accent:T.border}`, background:b.pagina===p2.id?T.accent:T.cardAlt, color:b.pagina===p2.id?"#fff":T.textMute, cursor:"pointer", fontSize:9, fontWeight:700 }}>{p2.lb}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+
+        <button onClick={()=>{ if(window.confirm("Restaurar a organização padrão de instalação dos blocos?")) setLayoutBlocos(null); }} style={{ width:"100%", padding:"11px", borderRadius:10, border:`1px solid ${T.accentBorder}`, background:T.accentBg, color:T.accentSoft, cursor:"pointer", fontSize:12, fontWeight:700 }}>♻️ Restaurar padrão de instalação</button>
+      </div>
     </div>
   );
+}
+
+function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onResetDados, onResetApp, onDesfazerDados, onExportar, onImportar, onExportarPDF, onOrganizarBlocos, onClose }) {
+  const [showLogs, setShowLogs] = useState(false);
+  const [secAberta, setSecAberta] = useState("aparencia");
+  // uso de armazenamento local (dados do app no aparelho)
+  const usoStorage = (() => {
+    try { let t=0; Object.keys(localStorage).forEach(k=>{ if(k.startsWith(PREFIXO)) t += (localStorage.getItem(k)||"").length; }); return (t/1024).toFixed(1)+" KB"; }
+    catch(e){ return "—"; }
+  })();
+
   const Opcao = ({ ativo, onClick, children, cor }) => (
     <button onClick={onClick} style={{
       flex:"1 1 0", padding:"12px 8px", borderRadius:10, cursor:"pointer",
@@ -4437,6 +4730,26 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
       display:"flex", flexDirection:"column", alignItems:"center", gap:4
     }}>{children}</button>
   );
+  const mini = (t) => <div style={{ fontSize:10, color:T.textMute, fontWeight:700, margin:"12px 0 8px", textTransform:"uppercase", letterSpacing:0.5 }}>{t}</div>;
+  const nota = (t) => <div style={{ fontSize:9, color:T.textFaint, marginTop:6, lineHeight:1.5 }}>{t}</div>;
+
+  // sanfona como FUNÇÃO (não componente) — evita remontagem e perda de foco no input
+  const sanfona = ({ id, emoji, titulo, sub, children }) => {
+    const aberta = secAberta===id;
+    return (
+      <div key={id} style={{ border:`1px solid ${aberta?T.accentBorder:T.border}`, borderRadius:12, marginBottom:10, overflow:"hidden", background:T.card }}>
+        <button onClick={()=>setSecAberta(aberta?null:id)} style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"13px 14px", background:"transparent", border:"none", cursor:"pointer", textAlign:"left" }}>
+          <span style={{ fontSize:17 }}>{emoji}</span>
+          <span style={{ flex:1, minWidth:0 }}>
+            <span style={{ display:"block", fontSize:13, fontWeight:800, color:T.text }}>{titulo}</span>
+            <span style={{ display:"block", fontSize:9, color:T.textFaint, marginTop:1 }}>{sub}</span>
+          </span>
+          <span style={{ fontSize:11, color:T.textMute, transform:aberta?"rotate(90deg)":"none", transition:"transform 0.2s" }}>▶</span>
+        </button>
+        {aberta && <div style={{ padding:"2px 14px 14px" }}>{children}</div>}
+      </div>
+    );
+  };
 
   return (
     <div onClick={onClose} className="modal-overlay" style={{
@@ -4449,13 +4762,14 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
         width:"100%", maxWidth:440, padding:"20px", boxShadow:"0 20px 60px #000c"
       }}>
         {/* cabeçalho */}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
           <div style={{ fontSize:18,fontWeight:800,color:T.text }}>⚙️ Configurações</div>
           <button onClick={onClose} style={{ width:34,height:34,borderRadius:8,border:`1px solid ${T.border}`,background:T.cardAlt,color:T.text,cursor:"pointer",fontSize:16 }}>✕</button>
         </div>
 
-        {/* TEMA DE CORES */}
-        <Secao titulo="🎨 Tema de cores">
+        {/* ═══ 🎨 APARÊNCIA ═══ */}
+        {sanfona({ id:"aparencia", emoji:"🎨", titulo:"Aparência", sub:"Tema, exibição, fonte e densidade", children:(<>
+          {mini("Tema de cores")}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
             {Object.entries(TEMAS).map(([id,tema])=>(
               <Opcao key={id} ativo={temaId===id} onClick={()=>setTemaId(id)}>
@@ -4464,10 +4778,8 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
               </Opcao>
             ))}
           </div>
-        </Secao>
 
-        {/* MODO DE LAYOUT */}
-        <Secao titulo="🖥️ Modo de exibição">
+          {mini("Modo de exibição")}
           <div style={{ display:"flex",gap:8 }}>
             <Opcao ativo={layout==="celular"} onClick={()=>setLayout("celular")} cor={T.accent}>
               <span style={{ fontSize:22 }}>📱</span>
@@ -4483,14 +4795,12 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
           {layout==="tv" && (
             <div style={{ marginTop:8,background:`${T.green}14`,border:`1px solid ${T.green}44`,borderRadius:8,padding:"8px 10px" }}>
               <div style={{ fontSize:10,color:T.green,lineHeight:1.6 }}>
-                📺 Modo TV ativo: tudo maior e centralizado. Use teclado e mouse emparelhados na TV para navegar e configurar.
+                📺 Modo TV ativo: tudo maior e centralizado. Use teclado e mouse emparelhados na TV para navegar.
               </div>
             </div>
           )}
-        </Secao>
 
-        {/* TAMANHO DA FONTE */}
-        <Secao titulo="🔤 Tamanho da fonte">
+          {mini("Tamanho da fonte")}
           <div style={{ display:"flex",gap:6 }}>
             {[
               {v:0.85,l:"P",nome:"Pequeno"},
@@ -4504,10 +4814,8 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
               </Opcao>
             ))}
           </div>
-        </Secao>
 
-        {/* DENSIDADE */}
-        <Secao titulo="📏 Densidade dos elementos">
+          {mini("Densidade dos elementos")}
           <div style={{ display:"flex",gap:8 }}>
             <Opcao ativo={densidade==="compacto"} onClick={()=>setDensidade("compacto")}>
               <span style={{ fontSize:18 }}>▤</span>
@@ -4518,43 +4826,38 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
               <span>Confortável</span>
             </Opcao>
           </div>
-        </Secao>
+        </>)})}
 
-        {/* DADOS — salvamento automático */}
-        <Secao titulo="🗂️ Diagnóstico e logs">
-          <button onClick={()=>setShowLogs(true)} style={{
-            width:"100%", padding:"12px", borderRadius:10, cursor:"pointer", marginBottom:8,
-            border:`1px solid ${T.accent}55`, background:`${T.accent}12`, color:T.accentSoft, fontSize:13, fontWeight:700,
-            display:"flex", alignItems:"center", justifyContent:"center", gap:8
-          }}>🗂️ Ver histórico de logs</button>
-          <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
-            Registra tudo: cotações, edições, chat e erros — com filtros por tipo, fluxo (ida/volta), origem e data. Útil para entender onde algo falha.
-          </div>
-        </Secao>
+        {/* ═══ 🧩 PÁGINAS E BLOCOS ═══ */}
+        {sanfona({ id:"blocos", emoji:"🧩", titulo:"Páginas e blocos", sub:"Mova, ordene e oculte os blocos do app", children:(<>
+          <button onClick={onOrganizarBlocos} style={{
+            width:"100%", padding:"12px", borderRadius:10, cursor:"pointer", marginTop:8,
+            border:`1px solid ${T.cyan}66`, background:`${T.cyan}14`, color:T.cyan, fontSize:13, fontWeight:700
+          }}>🧩 Organizar blocos das páginas</button>
+          {nota("Mova blocos entre Painel, Análises, Agenda, Ranking e Custo de vida; mude a ordem (↑↓) ou oculte. A IA também organiza por comando no chat. \"Restaurar padrão\" desfaz tudo.")}
+        </>)})}
 
-        {showLogs && <VisualizadorLogs onClose={()=>setShowLogs(false)} T={T}/>}
+        {/* ═══ 🤖 SERVIDOR DE IA ═══ */}
+        {sanfona({ id:"ia", emoji:"🤖", titulo:"Servidor de IA", sub:"Endereço da ponte (AI Bridge)", children:(<>
+          {mini("Endereço do servidor")}
+          <input value={bridgeUrl} onChange={e=>setBridgeUrl(e.target.value.trim())}
+            placeholder="http://100.100.195.84:4000"
+            style={{ width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:8, color:T.text, padding:"9px 11px", fontSize:12, outline:"none", fontFamily:"monospace" }}/>
+          {nota("IP Tailscale do seu PC + porta 4000. O app também tenta detectar o servidor sozinho (Tailscale → rede local). Usado pela aba Assistente IA.")}
+        </>)})}
 
-        <Secao titulo="💾 Dados">
-          {/* endereço do servidor de IA */}
-          <div style={{ marginBottom:12 }}>
-            <div style={{ fontSize:10, color:T.textMute, marginBottom:5 }}>🤖 Endereço do servidor de IA (AI Bridge)</div>
-            <input value={bridgeUrl} onChange={e=>setBridgeUrl(e.target.value.trim())}
-              placeholder="http://100.100.195.84:4000"
-              style={{ width:"100%", background:T.cardAlt, border:`1px solid ${T.borderSoft}`, borderRadius:8, color:T.text, padding:"9px 11px", fontSize:12, outline:"none", fontFamily:"monospace" }}/>
-            <div style={{ fontSize:9, color:T.textFaint, marginTop:4 }}>IP Tailscale do seu PC + porta 4000. Usado pela aba Assistente IA.</div>
-          </div>
-
-          <div style={{ background:`${T.green}10`, border:`1px solid ${T.green}33`, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+        {/* ═══ 💾 DADOS E BACKUP ═══ */}
+        {sanfona({ id:"dados", emoji:"💾", titulo:"Dados e backup", sub:"Exportar, importar e relatório PDF", children:(<>
+          <div style={{ background:`${T.green}10`, border:`1px solid ${T.green}33`, borderRadius:10, padding:"10px 12px", marginTop:8, marginBottom:10 }}>
             <div style={{ display:"flex", alignItems:"center", gap:7 }}>
               <span style={{ fontSize:16 }}>✓</span>
               <div style={{ fontSize:11, color:T.green, fontWeight:700 }}>Salvamento automático ativado</div>
             </div>
             <div style={{ fontSize:10, color:T.textMute, marginTop:4, lineHeight:1.5 }}>
-              Suas edições de ativos, meta e preferências ficam gravadas no aparelho e voltam ao reabrir o app.
+              Edições, metas e preferências ficam gravadas no aparelho e voltam ao reabrir o app.
             </div>
           </div>
-          {/* backup */}
-          <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+          <div style={{ display:"flex", gap:6 }}>
             <button onClick={onExportar} style={{
               flex:1, padding:"10px", borderRadius:10, cursor:"pointer",
               border:`1px solid ${T.green}55`, background:`${T.green}12`, color:T.green, fontSize:12, fontWeight:600
@@ -4564,38 +4867,68 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
               border:`1px solid ${T.cyan}55`, background:`${T.cyan}12`, color:T.cyan, fontSize:12, fontWeight:600
             }}>⬆️ Importar backup</button>
           </div>
-          <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
-            Exporta um arquivo com todos os seus dados (ativos, meta, custo de vida). Guarde-o para restaurar se trocar de aparelho ou reinstalar.
-          </div>
-          {/* relatório PDF */}
+          {nota("Exporta um arquivo com todos os seus dados (ativos, metas, custo de vida). Guarde-o para restaurar se trocar de aparelho.")}
           <button onClick={onExportarPDF} style={{
-            width:"100%", padding:"11px", borderRadius:10, cursor:"pointer", marginBottom:8,
+            width:"100%", padding:"11px", borderRadius:10, cursor:"pointer", marginTop:10,
             border:`1px solid ${T.accent}`, background:T.accent, color:"#fff", fontSize:12, fontWeight:700
           }}>📄 Gerar relatório PDF da carteira</button>
-          <div style={{ fontSize:9, color:T.textFaint, marginBottom:8, lineHeight:1.5 }}>
-            Cria um PDF com patrimônio, dividendos, composição por classe, lista de ativos e metas — pronto para guardar ou imprimir.
+          {nota("PDF com patrimônio, dividendos, composição, lista de ativos e metas — pronto para guardar, imprimir ou compartilhar.")}
+        </>)})}
+
+        {/* ═══ 🗂️ DIAGNÓSTICO ═══ */}
+        {sanfona({ id:"diagnostico", emoji:"🗂️", titulo:"Diagnóstico", sub:"Histórico de logs do app", children:(<>
+          <button onClick={()=>setShowLogs(true)} style={{
+            width:"100%", padding:"12px", borderRadius:10, cursor:"pointer", marginTop:8,
+            border:`1px solid ${T.accent}55`, background:`${T.accent}12`, color:T.accentSoft, fontSize:13, fontWeight:700
+          }}>🗂️ Ver histórico de logs</button>
+          {nota("Registra tudo: cotações, edições, chat e erros — com filtros por tipo, fluxo, origem e data. Útil para entender onde algo falha.")}
+        </>)})}
+
+        {/* ═══ 🛟 SEGURANÇA E RESET ═══ */}
+        {sanfona({ id:"seguranca", emoji:"🛟", titulo:"Segurança e reset", sub:"Resets separados: aparência ou dados", children:(<>
+          <button onClick={onResetApp} style={{
+            width:"100%", padding:"11px", borderRadius:10, cursor:"pointer", marginTop:8,
+            border:`1px solid ${T.accentBorder}`, background:T.accentBg, color:T.accentSoft, fontSize:12, fontWeight:700
+          }}>🎨 Resetar aparência do app</button>
+          {nota("Volta tema, layout, densidade, fonte e blocos ao padrão de instalação. NÃO mexe nos dados da carteira.")}
+
+          <button onClick={onDesfazerDados} style={{
+            width:"100%", padding:"11px", borderRadius:10, cursor:"pointer", marginTop:12,
+            border:`1px solid ${T.amber}77`, background:`${T.amber}14`, color:T.amber, fontSize:12, fontWeight:700
+          }}>↩️ Desfazer última alteração de dados</button>
+          {nota("Restaura os dados da carteira do backup guardado antes do último reset ou alteração grave (inclusive edições da IA).")}
+
+          <button onClick={onResetDados} style={{
+            width:"100%", padding:"11px", borderRadius:10, cursor:"pointer", marginTop:12,
+            border:`1px solid ${T.red}55`, background:`${T.red}12`, color:T.red, fontSize:12, fontWeight:700
+          }}>🗑️ Resetar dados da carteira</button>
+          {nota("Volta ativos, metas e custo de vida ao início — guardando um backup para desfazer. NÃO mexe na aparência.")}
+        </>)})}
+
+        {/* ═══ ℹ️ SOBRE ═══ */}
+        {sanfona({ id:"sobre", emoji:"ℹ️", titulo:"Sobre o app", sub:"Versão e armazenamento", children:(<>
+          <div style={{ display:"flex", gap:8, marginTop:8 }}>
+            <div style={{ flex:1, background:T.cardAlt, borderRadius:10, padding:"10px 12px" }}>
+              <div style={{ fontSize:9, color:T.textFaint }}>Versão</div>
+              <div style={{ fontSize:13, fontWeight:800, color:T.text }}>Carteira Proventos 2.0</div>
+            </div>
+            <div style={{ flex:1, background:T.cardAlt, borderRadius:10, padding:"10px 12px" }}>
+              <div style={{ fontSize:9, color:T.textFaint }}>Dados no aparelho</div>
+              <div style={{ fontSize:13, fontWeight:800, color:T.text }}>{usoStorage}</div>
+            </div>
           </div>
-          <button onClick={onLimparDados} style={{
-            width:"100%", padding:"10px", borderRadius:10, cursor:"pointer",
-            border:`1px solid ${T.red}55`, background:`${T.red}12`, color:T.red, fontSize:12, fontWeight:600
-          }}>
-            🗑️ Limpar dados salvos (voltar ao original)
-          </button>
-        </Secao>
+          {nota("App pessoal de acompanhamento de dividendos da B3 com assistente de IA local e privado. Seus dados não saem do seu aparelho (exceto o chat, que fala com o SEU servidor).")}
+        </>)})}
 
-        {/* RESET + FECHAR */}
-        <div style={{ display:"flex",gap:8,marginTop:8 }}>
-          <button onClick={()=>{ setTemaId("padrao"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); }}
-            style={{ flex:"1 1 0",padding:"11px",borderRadius:10,border:`1px solid ${T.borderSoft}`,background:T.cardAlt,color:T.textMute,cursor:"pointer",fontSize:12,fontWeight:600 }}>
-            ↺ Restaurar padrão
-          </button>
-          <button onClick={onClose} style={{ flex:"1 1 0",padding:"11px",borderRadius:10,border:"none",background:T.accent,color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700 }}>
-            ✓ Aplicar e fechar
-          </button>
-        </div>
+        {showLogs && <VisualizadorLogs onClose={()=>setShowLogs(false)} T={T}/>}
 
-        <div style={{ marginTop:14,fontSize:10,color:T.textFaint,textAlign:"center",lineHeight:1.6 }}>
-          As preferências valem durante o uso. No modo TV, empareie teclado e mouse via Bluetooth nas configurações da sua TV.
+        {/* FECHAR */}
+        <button onClick={onClose} style={{ width:"100%", marginTop:6, padding:"13px", borderRadius:10, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:13, fontWeight:700 }}>
+          ✓ Fechar
+        </button>
+
+        <div style={{ marginTop:12,fontSize:10,color:T.textFaint,textAlign:"center",lineHeight:1.6 }}>
+          Tudo é salvo automaticamente. No modo TV, empareie teclado e mouse via Bluetooth.
         </div>
       </div>
     </div>
@@ -4633,6 +4966,110 @@ export default function App() {
   const [proventosRecebidos, setProventosRecebidos] = useEstadoSalvo("proventosRecebidos", { porMes:{}, total:0, registros:[] }); // realizado (da planilha B3)
   const [showMeta,   setShowMeta]   = useState(false);
   const [showAporte, setShowAporte] = useState(false);
+
+  // ── CAMADA 2: BLOCOS CONFIGURÁVEIS (ordem/página/visibilidade por cima da base) ──
+  const [layoutBlocos, setLayoutBlocos] = useEstadoSalvo("layoutBlocos", null); // null = padrão de instalação
+  const [showBlocos, setShowBlocos] = useState(false);
+  // ── ESTILOS CUSTOM (camada acima — a IA estiliza elementos registrados) ──
+  const [estilosCustom, setEstilosCustom] = useEstadoSalvo("estilosCustom", null); // null = padrão intacto
+  const estiloDe = (id, base=13) => {
+    const e = (estilosCustom||{})[id]; if (!e) return { style:{}, cls:"" };
+    const style = {};
+    if (e.escala)   style.fontSize = Math.round(base*e.escala*10)/10;
+    if (e.cor)      style.color = e.cor;
+    if (e.negrito!=null) style.fontWeight = e.negrito?800:500;
+    if (e.italico)  style.fontStyle = "italic";
+    if (e.sublinhado) style.textDecoration = "underline";
+    return { style, cls: (e.animacao && e.animacao!=="nenhuma") ? `ia-anim-${e.animacao}` : "" };
+  };
+  const configBloco = (id) => {
+    const def = BLOCOS_DEF.find(b=>b.id===id) || {};
+    const c = (layoutBlocos||{})[id] || {};
+    return { pagina: BLOCOS_PAGINAS.includes(c.pagina)?c.pagina:def.paginaPadrao, ordem: c.ordem??def.ordemPadrao, visivel: c.visivel!==false };
+  };
+  const blocosDe = (pagina) => BLOCOS_DEF
+    .map(b=>({ ...b, ...configBloco(b.id) }))
+    .filter(b=>b.visivel && b.pagina===pagina)
+    .sort((a,b)=>a.ordem-b.ordem);
+  const renderBloco = (id) => {
+    if (id==="prox3meses") return <BlocoProx3Meses ativos={ativos} estiloDe={estiloDe} T={T}/>;
+    if (id==="graficoMensal") return <BlocoGraficoMensal ativos={ativos} estiloDe={estiloDe} T={T}/>;
+    if (id==="projecao") return <ProjecaoProventos ativos={ativos} T={T}/>;
+    if (id==="previstoRealizado") return <PrevistoVsRealizado ativos={ativos} proventosRecebidos={proventosRecebidos} estiloDe={estiloDe} T={T}/>;
+    return null;
+  };
+  const blocosJSX = (pagina) => blocosDe(pagina).map(b=><div key={b.id}>{renderBloco(b.id)}</div>);
+
+  // ── CAMADA DE ALTERAÇÕES DA IA (preview → aplicar/cancelar) ─────────────
+  const [previewAtivo, setPreviewAtivo] = useState(false);
+  const [snapshotConfig, setSnapshotConfig] = useState(null); // config antes do preview
+  const [previewResumo, setPreviewResumo] = useState([]);      // o que muda (texto)
+
+  // aplica uma lista de ações nos estados reais (usado por preview e aplicar direto)
+  const executarAcoes = (acoes) => {
+    const resumo = [];
+    acoes.forEach(a=>{
+      const v = a.valor;
+      if (a.tipo==="tema" && TEMAS[v]) { setTemaId(v); resumo.push(`Tema → ${TEMAS[v].nome}`); }
+      else if (a.tipo==="layout" && ["celular","tv"].includes(v)) { setLayout(v); resumo.push(`Layout → ${v==="tv"?"TV":"Celular"}`); }
+      else if (a.tipo==="densidade" && ["compacto","confortavel"].includes(v)) { setDensidade(v); resumo.push(`Densidade → ${v}`); }
+      else if (a.tipo==="fonte") { const f=parseFloat(v)||1; setFontEsc(f); resumo.push(`Fonte → ${f}x`); }
+      else if (a.tipo==="meta") { const n=+v||0; setMetaMensal(n); resumo.push(`Meta de proventos → ${fmt(n)}/mês`); }
+      else if (a.tipo==="aporte") { const n=+v||0; setMetaAporte(n); resumo.push(`Meta de aporte → ${fmt(n)}/mês`); }
+      else if (a.tipo==="navegar") { setAba(v); resumo.push(`Ir para: ${v}`); }
+      else if (a.tipo==="blocoMover" && v && v.id && BLOCOS_DEF.some(b=>b.id===v.id) && BLOCOS_PAGINAS.includes(v.pagina)) {
+        const nome = BLOCOS_DEF.find(b=>b.id===v.id)?.nome || v.id;
+        setLayoutBlocos(prev=>({ ...(prev||{}), [v.id]: { ...configBloco(v.id), pagina:v.pagina } }));
+        resumo.push(`Bloco "${nome}" → ${v.pagina}`);
+      }
+      else if (a.tipo==="blocoVisivel" && v && v.id && BLOCOS_DEF.some(b=>b.id===v.id)) {
+        const nome = BLOCOS_DEF.find(b=>b.id===v.id)?.nome || v.id;
+        setLayoutBlocos(prev=>({ ...(prev||{}), [v.id]: { ...configBloco(v.id), visivel: v.visivel!==false } }));
+        resumo.push(`Bloco "${nome}" → ${v.visivel!==false?"visível":"oculto"}`);
+      }
+      else if (a.tipo==="estilo" && v && v.id && ELEMENTOS_ESTILO[v.id]) {
+        const nome = ELEMENTOS_ESTILO[v.id].nome;
+        setEstilosCustom(prev=>{
+          if (v.reset) { const c={ ...(prev||{}) }; delete c[v.id]; return Object.keys(c).length?c:null; }
+          const atual = (prev||{})[v.id]||{};
+          const novo = { ...atual };
+          if (v.escala!=null) novo.escala = Math.max(0.5, Math.min(3, +v.escala||1));
+          if (v.cor) novo.cor = String(v.cor).slice(0,20);
+          if (v.negrito!=null) novo.negrito = !!v.negrito;
+          if (v.italico!=null) novo.italico = !!v.italico;
+          if (v.sublinhado!=null) novo.sublinhado = !!v.sublinhado;
+          if (v.animacao && ANIMACOES_IA.includes(v.animacao)) novo.animacao = v.animacao;
+          return { ...(prev||{}), [v.id]: novo };
+        });
+        resumo.push(v.reset ? `Estilo de "${nome}" restaurado` : `Estilo de "${nome}" ajustado`);
+      }
+    });
+    return resumo;
+  };
+  // entra no modo PREVIEW (guarda snapshot, aplica temporariamente, mostra barra)
+  const entrarPreview = (acoes) => {
+    setSnapshotConfig({ temaId, layout, densidade, fontEsc, metaMensal, metaAporte, aba, layoutBlocos, estilosCustom });
+    const resumo = executarAcoes(acoes);
+    setPreviewResumo(resumo);
+    setPreviewAtivo(true);
+    registrarLog("sistema", `Preview de ${acoes.length} alteração(ões) da IA`, { direcao:"interno", origem:"app", detalhe:resumo.join("; ") });
+  };
+  const aplicarPreview = () => {
+    setSnapshotConfig(null); setPreviewAtivo(false);
+    registrarLog("sistema", `Alterações aplicadas: ${previewResumo.join("; ")}`, { direcao:"interno", origem:"app" });
+    setPreviewResumo([]);
+  };
+  const cancelarPreview = () => {
+    if (snapshotConfig) {
+      setTemaId(snapshotConfig.temaId); setLayout(snapshotConfig.layout); setDensidade(snapshotConfig.densidade);
+      setFontEsc(snapshotConfig.fontEsc); setMetaMensal(snapshotConfig.metaMensal); setMetaAporte(snapshotConfig.metaAporte);
+      setAba(snapshotConfig.aba);
+      setLayoutBlocos(snapshotConfig.layoutBlocos ?? null);
+      setEstilosCustom(snapshotConfig.estilosCustom ?? null);
+    }
+    setSnapshotConfig(null); setPreviewAtivo(false); setPreviewResumo([]);
+    registrarLog("sistema", "Alterações da IA canceladas (restaurado)", { direcao:"interno", origem:"app" });
+  };
 
   // ── CARTÃO / CUSTO DE VIDA — salvos na memória ──────────────────────────
   const [custoVida, setCustoVida] = useEstadoSalvo("custoVida", { agua:100, luz:200, condominio:0, aluguel:1000, internet:120, outros:0 });
@@ -4778,7 +5215,7 @@ export default function App() {
             /* ── TV: patrimônio e dividendos lado a lado (cabe na tela grande) ── */
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:16, marginBottom:14 }}>
               <div>
-                <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
+                <div className={estiloDe("dividendosHeader",11).cls} style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2, ...estiloDe("dividendosHeader",11).style }}>💰 Dividendos — total do ano</div>
                 <div style={{ display:"flex", alignItems:"baseline", gap:9, flexWrap:"wrap" }}>
                   <span style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</span>
                   <span style={{ fontSize:18, fontWeight:800, color:T.cyan, lineHeight:1.1 }}>{fmt(provEsteMes)} <span style={{ fontSize:11, fontWeight:600 }}>este mês</span></span>
@@ -4798,7 +5235,7 @@ export default function App() {
                 <span style={{ fontSize:"clamp(34px, 11vw, 52px)", fontWeight:800, color:T.text, letterSpacing:-1.5, lineHeight:1 }}>{fmt(patrimonioTotal)}</span>
               </button>
               <div>
-                <div style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2 }}>💰 Dividendos — total do ano</div>
+                <div className={estiloDe("dividendosHeader",11).cls} style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2, ...estiloDe("dividendosHeader",11).style }}>💰 Dividendos — total do ano</div>
                 <div style={{ display:"flex", alignItems:"baseline", gap:8, flexWrap:"wrap" }}>
                   <span style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</span>
                   <span style={{ fontSize:16, fontWeight:800, color:T.cyan, lineHeight:1.1 }}>{fmt(provEsteMes)} <span style={{ fontSize:10, fontWeight:600 }}>este mês</span></span>
@@ -4827,7 +5264,7 @@ export default function App() {
         </div>
 
         {/* TRILHA DE METAS — progressão por estágios */}
-        <CarrosselMetas ativos={ativos} mediaMes={mediaMes} metaMensal={metaMensal} metaAporte={metaAporte} aporteEsteMes={aporteEsteMes} custoVida={custoVida} onConfigurar={()=>setShowMeta(true)} onConfigAporte={()=>setShowAporte(true)} onAbrirAnalises={()=>setAba("analises")} onAbrirContas={()=>setAba("custovida")} onAbrirReserva={()=>setShowReserva(true)} T={T} />
+        <CarrosselMetas ativos={ativos} mediaMes={mediaMes} metaMensal={metaMensal} metaAporte={metaAporte} aporteEsteMes={aporteEsteMes} custoVida={custoVida} onConfigurar={()=>setShowMeta(true)} onConfigAporte={()=>setShowAporte(true)} onAbrirAnalises={()=>setAba("analises")} onAbrirContas={()=>setAba("custovida")} onAbrirReserva={()=>setShowReserva(true)} estiloDe={estiloDe} T={T} />
         </>)}
       </div>
 
@@ -4845,13 +5282,32 @@ export default function App() {
 
       {showReserva && <TelaReservaPlus ativos={ativos} onClose={()=>setShowReserva(false)} T={T}/>}
 
+      {showBlocos && <OrganizarBlocos layoutBlocos={layoutBlocos} setLayoutBlocos={setLayoutBlocos} onClose={()=>setShowBlocos(false)} T={T}/>}
+
       {/* POPUP GLOBAL DE EDITAR/ADICIONAR ATIVO — abre de qualquer lugar */}
       {editandoTicker!==undefined && (
         <EditarAtivoPopup ticker={editandoTicker} ativos={ativos} setAtivos={setAtivos} onClose={()=>setEditandoTicker(undefined)} T={T}/>
       )}
 
       {/* MENU FLUTUANTE — Home no centro + atalhos, sempre leva à Home */}
-      {!showCarteira && !showReserva && editandoTicker===undefined && (
+      {/* BARRA DE PREVIEW — aparece durante a pré-visualização de alterações da IA */}
+      {previewAtivo && (
+        <div style={{ position:"fixed", left:0, right:0, bottom:0, zIndex:1500, background:T.card, borderTop:`2px solid ${T.accent}`, boxShadow:"0 -8px 30px #0006", padding:"12px 14px calc(12px + env(safe-area-inset-bottom))" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:16 }}>👁️</span>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:12, fontWeight:800, color:T.text }}>Pré-visualização de alterações</div>
+              <div style={{ fontSize:10, color:T.textMute, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{previewResumo.join(" · ") || "navegue pelo app para ver como fica"}</div>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={cancelarPreview} style={{ flex:1, padding:"12px", borderRadius:10, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textDim, cursor:"pointer", fontSize:14, fontWeight:700 }}>Cancelar</button>
+            <button onClick={aplicarPreview} style={{ flex:2, padding:"12px", borderRadius:10, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:14, fontWeight:800 }}>✓ Aplicar</button>
+          </div>
+        </div>
+      )}
+
+      {!showCarteira && !showReserva && !previewAtivo && editandoTicker===undefined && (
         <div style={{ position:"fixed", left:0, right:0, bottom:14, display:"flex", justifyContent:"center", zIndex:900, pointerEvents:"none" }}>
           <div style={{ display:"flex", alignItems:"center", gap:4, background:T.card, border:`1px solid ${T.borderSoft}`, borderRadius:30, padding:"7px 10px", boxShadow:"0 8px 30px #0006", pointerEvents:"auto" }}>
             {[
@@ -4890,13 +5346,39 @@ export default function App() {
           fontEsc={fontEsc} setFontEsc={setFontEsc}
           densidade={densidade} setDensidade={setDensidade}
           bridgeUrl={bridgeUrl} setBridgeUrl={setBridgeUrl}
-          onLimparDados={()=>{
-            if(window.confirm("Apagar TODOS os dados salvos (ativos editados, meta e preferências) e voltar ao original? Isso não pode ser desfeito.")){
-              try { Object.keys(localStorage).filter(k=>k.startsWith(PREFIXO)).forEach(k=>localStorage.removeItem(k)); } catch {}
+          onResetDados={()=>{
+            if(window.confirm("RESET DE DADOS DA CARTEIRA\n\nIsso volta seus ativos, metas e custo de vida ao estado inicial. Suas preferências de aparência (tema, layout) são mantidas.\n\nUm backup dos dados atuais será guardado para você desfazer. Continuar?")){
+              try { localStorage.setItem(PREFIXO+"backupDados", JSON.stringify({ ativos, metaMensal, metaAporte, custoVida, proventosRecebidos, historico, quando:new Date().toISOString() })); } catch {}
               setAtivos(ATIVOS_INICIAIS.map(a=>({...a})));
-              setTemaId("padrao"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); setMetaMensal(500);
+              setMetaMensal(500); setMetaAporte(0);
+              setCustoVida({ agua:100, luz:200, condominio:0, aluguel:1000, internet:120, outros:0 });
+              setProventosRecebidos({ porMes:{}, total:0, registros:[] });
+              registrarLog("sistema","Reset de dados da carteira (backup guardado)",{ direcao:"interno", origem:"app" });
               setShowConfig(false);
             }
+          }}
+          onResetApp={()=>{
+            if(window.confirm("RESET DE CONFIGURAÇÃO DO APP\n\nIsso volta a aparência (tema, layout, densidade, fonte) ao padrão de instalação. Seus dados da carteira NÃO são afetados. Continuar?")){
+              setTemaId("padrao"); setLayout("celular"); setFontEsc(1); setDensidade("confortavel"); setLayoutBlocos(null); setEstilosCustom(null);
+              registrarLog("sistema","Reset de configuração do app (aparência padrão)",{ direcao:"interno", origem:"app" });
+              setShowConfig(false);
+            }
+          }}
+          onDesfazerDados={()=>{
+            try {
+              const b = JSON.parse(localStorage.getItem(PREFIXO+"backupDados")||"null");
+              if (!b) { window.alert("Não há backup de dados para desfazer."); return; }
+              if(window.confirm(`Restaurar os dados da carteira do backup de ${new Date(b.quando).toLocaleString("pt-BR")}? Isso desfaz o último reset/alteração grave.`)){
+                if (b.ativos) setAtivos(b.ativos);
+                if (b.metaMensal!=null) setMetaMensal(b.metaMensal);
+                if (b.metaAporte!=null) setMetaAporte(b.metaAporte);
+                if (b.custoVida) setCustoVida(b.custoVida);
+                if (b.proventosRecebidos) setProventosRecebidos(b.proventosRecebidos);
+                if (b.historico) setHistorico(b.historico);
+                registrarLog("sistema","Dados da carteira restaurados do backup",{ direcao:"interno", origem:"app" });
+                setShowConfig(false);
+              }
+            } catch(e){ window.alert("Erro ao restaurar backup."); }
           }}
           onExportar={()=>{
             const backup = {
@@ -4914,6 +5396,7 @@ export default function App() {
               URL.revokeObjectURL(url);
             } catch(e){ window.alert("Não foi possível exportar neste ambiente. No APK funciona normalmente."); }
           }}
+          onOrganizarBlocos={()=>{ setShowConfig(false); setShowBlocos(true); }}
           onExportarPDF={()=>{
             try {
               registrarLog("sistema", "Relatório PDF gerado", { direcao:"interno", origem:"app" });
@@ -5040,14 +5523,15 @@ export default function App() {
         )}
 
         {/* ABA PAINEL (dashboard) */}
-        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} proventosRecebidos={proventosRecebidos} T={T}/>}
+        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} proventosRecebidos={proventosRecebidos} blocosRender={blocosJSX("painel")} estiloDe={estiloDe} T={T}/>}
 
 
         {/* ABA CALENDÁRIO */}
-        {aba==="calendario" && <Calendario ativos={ativos} T={T}/>}
+        {aba==="calendario" && (<>{blocosJSX("calendario")}<Calendario ativos={ativos} T={T}/></>)}
 
         {/* ABA GRÁFICO */}
-        {aba==="analises" && (
+        {aba==="analises" && (<>
+          {blocosJSX("analises")}
           <>
             <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 6px 8px",marginBottom:20 }}>
               <div style={{ paddingLeft:8,marginBottom:6,fontSize:10,color:T.textFaint,textTransform:"uppercase",letterSpacing:1 }}>
@@ -5089,7 +5573,7 @@ export default function App() {
             {/* análises de carteira (yield, saúde, benchmarks) */}
             <AnaliseCarteira ativos={ativos} T={T}/>
           </>
-        )}
+        </>)}
 
         {/* ABA RANKING */}
         {aba==="ranking" && (
@@ -5102,7 +5586,7 @@ export default function App() {
         {aba==="cenario" && <CenarioFuturo ativos={ativos} fundosProvisionados={fundosProvisionados} T={T}/>}
 
         {/* ABA CUSTO DE VIDA */}
-        {aba==="custovida" && <CustoVida custoVida={custoVida} setCustoVida={setCustoVida} mediaMes={mediaMes} T={T}/>}
+        {aba==="custovida" && (<>{blocosJSX("custovida")}<CustoVida custoVida={custoVida} setCustoVida={setCustoVida} mediaMes={mediaMes} T={T}/></>)}
 
         {/* ABA CARTÃO */}
         {aba==="cartao" && <CartaoCredito ativos={ativos} mediaMes={mediaMes} custoVida={custoVida} setCustoVida={setCustoVida} fundosProvisionados={fundosProvisionados} setFundosProvisionados={setFundosProvisionados} T={T}/>}
@@ -5111,7 +5595,7 @@ export default function App() {
         {aba==="editar" && <EditarAtivos ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} T={T}/>}
 
         {/* ABA CHAT / ASSISTENTE IA */}
-        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} servidorNome={servidorNome} T={T}/>}
+        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} servidorNome={servidorNome} onVisualizarAcoes={entrarPreview} onAplicarAcoes={executarAcoes} T={T}/>}
 
         {(aba==="analises"||aba==="ranking") && (
           <div style={{ background:T.cardAlt,border:`1px dashed ${T.borderSoft}`,borderRadius:10,padding:"10px 12px",marginTop:14 }}>
