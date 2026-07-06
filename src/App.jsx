@@ -3389,7 +3389,7 @@ function gerarEstagios(metaMensal, nEstagios) {
   }));
 }
 
-function TrilhaMetas({ valorAtual, metaMensal, compacto=false, onConfigurar, onAbrirAnalises, T }) {
+function TrilhaMetas({ estiloDe = () => ({ style:{}, cls:"" }), valorAtual, metaMensal, compacto=false, onConfigurar, onAbrirAnalises, T }) {
   const [nivel, setNivel] = useState(0); // 0=base, 1=+500, 2=+1500
   const niveis = [{ lb:"Base", extra:0 }, { lb:"+R$500", extra:500 }, { lb:"+R$1.500", extra:1500 }];
   const metaEfetiva = metaMensal + niveis[nivel].extra;
@@ -3619,7 +3619,7 @@ function CarrosselMetas({ ativos, mediaMes, metaMensal, metaAporte=0, aporteEste
 
         {/* PAINEL 1 — META DE PROVENTOS (timeline detalhada + 3 níveis) */}
         <div style={{ flex: aberto?"0 0 88%":"0 0 70%", scrollSnapAlign:"center" }}>
-          <TrilhaMetas valorAtual={mediaMes} metaMensal={metaMensal} compacto={!aberto} onConfigurar={onConfigurar} onAbrirAnalises={onAbrirAnalises} T={T} />
+          <TrilhaMetas estiloDe={estiloDe} valorAtual={mediaMes} metaMensal={metaMensal} compacto={!aberto} onConfigurar={onConfigurar} onAbrirAnalises={onAbrirAnalises} T={T} />
         </div>
 
         {/* PAINEL 2 — CONTAS PAGAS (dados reais da página Custo de Vida) */}
