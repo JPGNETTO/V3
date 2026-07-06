@@ -5171,7 +5171,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
   const navRestaurando = useRef(false);
   const navPrev = useRef(null);
   useEffect(() => {
-    const atual = { aba, showCarteira, showReserva, showConfig, showBlocos, showImport, showMeta, showAporte, editandoTicker };
+    const atual = { aba, showCarteira, showReserva, showConfig, showBlocos, showMeta, showAporte, editandoTicker };
     if (navPrev.current === null) { navPrev.current = atual; return; }
     if (JSON.stringify(atual) === JSON.stringify(navPrev.current)) return;
     if (navRestaurando.current) { navRestaurando.current = false; navPrev.current = atual; return; }
@@ -5179,14 +5179,14 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
     if (navPilha.current.length > 60) navPilha.current.shift();
     navPrev.current = atual;
     try { window.history.pushState({ carteiraNav:true }, ""); } catch {}
-  }, [aba, showCarteira, showReserva, showConfig, showBlocos, showImport, showMeta, showAporte, editandoTicker]);
+  }, [aba, showCarteira, showReserva, showConfig, showBlocos, showMeta, showAporte, editandoTicker]);
   useEffect(() => {
     const onPop = () => {
       const alvo = navPilha.current.pop();
       if (!alvo) return; // pilha vazia → comportamento padrão (sair do app)
       navRestaurando.current = true;
       setAba(alvo.aba); setShowCarteira(!!alvo.showCarteira); setShowReserva(!!alvo.showReserva);
-      setShowConfig(!!alvo.showConfig); setShowBlocos(!!alvo.showBlocos); setShowImport(!!alvo.showImport);
+      setShowConfig(!!alvo.showConfig); setShowBlocos(!!alvo.showBlocos);
       setShowMeta(!!alvo.showMeta); setShowAporte(!!alvo.showAporte); setEditandoTicker(alvo.editandoTicker);
     };
     window.addEventListener("popstate", onPop);
