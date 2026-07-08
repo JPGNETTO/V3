@@ -4156,7 +4156,9 @@ function AnexoChat({ anexo, setAnexo, T }) {
       try {
         let txt = await lerAnexoArquivo(f);
         let truncado = false;
-        if (txt.length > 8000) { txt = txt.slice(0,8000); truncado = true; }
+        // limite conservador para caber na janela de contexto do modelo local
+        const LIMITE_ANEXO = 4000;
+        if (txt.length > LIMITE_ANEXO) { txt = txt.slice(0, LIMITE_ANEXO); truncado = true; }
         setAnexo({ nome:f.name, conteudo:txt, truncado });
         registrarLog("chat", `Arquivo anexado: ${f.name}`, { direcao:"interno", origem:"app" });
       } catch(err){ window.alert("Não consegui ler este arquivo. Formatos aceitos: txt, md, csv, json, xlsx."); }
@@ -4253,7 +4255,7 @@ function BotaoOuvirResposta({ texto, T }) {
 }
 
 function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes, onAplicarAcoes, T }) {
-  const [mensagens, setMensagens] = useState([]);
+  const [mensagens, setMensagens] = useEstadoSalvo("chatHistorico", []); // persistente por usuário (PREFIXO)
   const [input, setInput] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [anexo, setAnexo] = useState(null); // {nome, conteudo, truncado}
@@ -4290,7 +4292,13 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes
     const texto = input.trim();
     if ((!texto && !anexo) || carregando) return;
     setInput("");
-    const baseHist = mensagens.slice(-8).map(m=>({ role:m.role, content: m.contentServidor || m.content }));
+    // histórico enxuto: últimos 6 turnos, cada um recortado (evita estourar o contexto do modelo local)
+    const RECORTE_HIST = 1500;
+    const baseHist = mensagens.slice(-6).map(m=>{
+      let c = m.contentServidor || m.content || "";
+      if (c.length > RECORTE_HIST) c = c.slice(0, RECORTE_HIST) + " …(recortado)";
+      return { role:m.role, content:c };
+    });
     // se há anexo, o conteúdo vai embutido na mensagem para o modelo ler
     const mensagemServidor = anexo
       ? `[ARQUIVO ANEXADO: ${anexo.nome}${anexo.truncado?" (truncado)":""}]\n${anexo.conteudo}\n[/ARQUIVO]\n\n${texto || "Analise o arquivo anexado e resuma os pontos importantes."}`
@@ -4330,10 +4338,11 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes
     });
     const finalizarAssist = (raw, erro=false) => setMensagens(m=>{
       const { reasoning, content } = erro ? { reasoning:"", content:raw } : parseThink(raw);
-      const copy=[...m]; const last=copy[copy.length-1];
+      let copy=[...m]; const last=copy[copy.length-1];
       const msg = { role:"assistant", content: content || (erro?raw:""), reasoning, erro };
       if (last && last.role==="assistant" && last.streaming) copy[copy.length-1]=msg;
       else copy.push(msg);
+      if (copy.length > 40) copy = copy.slice(-40); // mantém só os 40 turnos mais recentes
       return copy;
     });
 
@@ -4361,7 +4370,18 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes
         atualizarAssist(acc);
       }
       clearTimeout(t);
-      finalizarAssist(acc || "(sem resposta)");
+      // servidor pode ter enviado um erro no corpo do stream (ex.: contexto estourado)
+      const accLow = (acc||"").toLowerCase();
+      const erroContexto = /context size|context length|kv cache|exceeded|out of memory|memory slot/.test(accLow);
+      if (!acc.trim() || erroContexto) {
+        const msgErro = erroContexto
+          ? "⚠️ O conteúdo enviado passou do limite que o modelo local consegue ler de uma vez (janela de contexto).\n\nComo resolver:\n• Envie um arquivo/trecho menor, ou\n• Aumente o \"Context Length\" do modelo no LM Studio (ex.: 8192), ou\n• Faça a pergunta em partes.\n\nDica: para bases grandes, importe pela tela ✏️ Editar em vez de anexar tudo no chat."
+          : "⚠️ O servidor não retornou texto. Verifique se o modelo está carregado no LM Studio.";
+        finalizarAssist(msgErro, true);
+        registrarLog("erro", `Stream sem texto útil (${erroContexto?"contexto estourado":"vazio"})`, { direcao:"volta", origem:"servidor", detalhe:(acc||"").slice(0,200) });
+        setStatusPC("online"); setCarregando(false); return;
+      }
+      finalizarAssist(acc);
       setStatusPC("online");
       registrarLog("chat", `Resposta (stream) em ${Date.now()-inicio}ms`, { direcao:"volta", origem:"servidor", detalhe:(acc||"").slice(0,200) });
       setCarregando(false);
@@ -4434,7 +4454,13 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes
             {statusPC==="online"?(servidorNome?`IA conectada · ${servidorNome}`:"IA conectada"):statusPC==="offline"?"Servidor offline":"Verificando..."}
           </span>
         </div>
-        <span style={{ fontSize:9, color:T.textFaint }}>🔒 IA local · privada</span>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          {mensagens.length>0 && (
+            <button onClick={()=>{ if(window.confirm("Limpar todo o histórico desta conversa? Esta ação não pode ser desfeita.")){ setMensagens([]); registrarLog("chat","Histórico do chat limpo pelo usuário",{ direcao:"interno", origem:"app" }); } }}
+              title="Limpar histórico" style={{ padding:"5px 9px", borderRadius:7, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:10, fontWeight:600 }}>🗑️ Limpar</button>
+          )}
+          <span style={{ fontSize:9, color:T.textFaint }}>🔒 IA local · privada</span>
+        </div>
       </div>
 
       {statusPC==="offline" && (
