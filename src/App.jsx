@@ -1,4 +1,7 @@
 import React, { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
+// Motion (ex-Framer Motion): animações aceleradas por hardware, fluidas no APK e no desktop.
+// Respeita a preferência de "movimento reduzido" do sistema por padrão.
+import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import {
@@ -89,12 +92,45 @@ function parseB3Movimentacao(linhas) {
   return { itens, lidas, ignoradas };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// REGRA FISCAL DOS PROVENTOS (Brasil) — calcula o LÍQUIDO real automaticamente
+// A planilha da B3 traz o valor creditado, mas não discrimina o imposto.
+// Aplicamos a regra oficial por tipo de provento:
+//  • Dividendo................ isento de IR para pessoa física (líquido = bruto)
+//  • Rendimento (FII)......... isento para PF que cumpre os requisitos (líquido = bruto)
+//  • JCP...................... IR retido na fonte: 15% até 2025, 17,5% a partir de 2026
+//  • Amortização.............. devolução de capital, não é renda (líquido = bruto)
+// Obs.: a B3 credita o JCP já líquido em muitos casos; por isso guardamos os dois
+// valores (bruto estimado e líquido creditado) e sinalizamos o imposto retido.
+// ════════════════════════════════════════════════════════════════════════════
+function aliquotaJCP(dataISO) {
+  // A partir de 01/01/2026 a alíquota do JCP passou de 15% para 17,5%
+  const ano = parseInt(String(dataISO||"").slice(0,4), 10) || new Date().getFullYear();
+  return ano >= 2026 ? 0.175 : 0.15;
+}
+function fiscalProvento(tipo, valorCreditado, dataISO) {
+  const t = String(tipo||"").toLowerCase();
+  const ehJCP = t.includes("juros"); // "Juros Sobre Capital Próprio" / "Juros"
+  if (!ehJCP) {
+    // Dividendo, Rendimento de FII e Amortização: sem IR na fonte para PF
+    return { bruto:+valorCreditado.toFixed(2), imposto:0, liquido:+valorCreditado.toFixed(2), tributavel:false, aliquota:0 };
+  }
+  // JCP: o valor creditado na conta já vem LÍQUIDO (IR retido na fonte pela empresa).
+  // Reconstituímos o bruto para transparência: bruto = liquido / (1 - aliquota)
+  const aliq = aliquotaJCP(dataISO);
+  const liquido = +valorCreditado.toFixed(2);
+  const bruto = +(liquido / (1 - aliq)).toFixed(2);
+  const imposto = +(bruto - liquido).toFixed(2);
+  return { bruto, imposto, liquido, tributavel:true, aliquota:aliq };
+}
+
 // Extrai os PROVENTOS RECEBIDOS (Rendimento/Dividendo/JCP/Amortização) da planilha B3.
-// Retorna { porMes: {"2026-01": 123.45, ...}, total, registros: [{data, ticker, valor, tipo}] }
+// Retorna { porMes, total (líquido), totalBruto, totalImposto, registros: [{data, ticker, valor, bruto, imposto, tipo}] }
 function parseProventosRecebidos(linhas) {
-  const porMes = {};
+  const porMes = {};       // líquido por mês (o que realmente entrou na conta)
+  const porMesBruto = {};  // bruto por mês (antes do IR)
   const registros = [];
-  let total = 0;
+  let total = 0, totalBruto = 0, totalImposto = 0;
   for (const r of linhas) {
     const mov = String(r["Movimentação"] ?? r["Movimentacao"] ?? "").trim();
     if (!B3_MOV_PROVENTO.has(mov)) continue;
@@ -104,12 +140,25 @@ function parseProventosRecebidos(linhas) {
     if (!isFinite(valor) || valor <= 0) continue;
     const data = b3Data(r["Data"] ?? r["Data do Negócio"]);
     if (!data) continue;
+    // aplica a regra fiscal real por tipo de provento
+    const f = fiscalProvento(mov, valor, data);
     const mesKey = data.slice(0,7); // YYYY-MM
-    porMes[mesKey] = +((porMes[mesKey] || 0) + valor).toFixed(2);
-    total += valor;
-    registros.push({ data, ticker: b3TickerDeProduto(r["Produto"]) || "—", valor:+valor.toFixed(2), tipo: mov });
+    porMes[mesKey]      = +((porMes[mesKey] || 0) + f.liquido).toFixed(2);
+    porMesBruto[mesKey] = +((porMesBruto[mesKey] || 0) + f.bruto).toFixed(2);
+    total += f.liquido; totalBruto += f.bruto; totalImposto += f.imposto;
+    registros.push({
+      data, ticker: b3TickerDeProduto(r["Produto"]) || "—", tipo: mov,
+      valor: f.liquido,           // líquido (o que caiu na conta)
+      bruto: f.bruto, imposto: f.imposto, aliquota: f.aliquota, tributavel: f.tributavel,
+    });
   }
-  return { porMes, total:+total.toFixed(2), registros };
+  registros.sort((a,b)=> a.data < b.data ? 1 : -1); // mais recentes primeiro
+  return {
+    porMes, porMesBruto, registros,
+    total: +total.toFixed(2),
+    totalBruto: +totalBruto.toFixed(2),
+    totalImposto: +totalImposto.toFixed(2),
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -144,14 +193,57 @@ async function detectarServidor(aoTestar) {
 // ════════════════════════════════════════════════════════════════════════════
 // Elementos que a IA pode estilizar (whitelist — protege a base do app)
 const ELEMENTOS_ESTILO = {
-  saudacao:                { nome:"Saudação do painel (Boa noite!)" },
-  tituloMetaProventos:     { nome:"Título 'Meta de proventos'" },
-  tituloProx3Meses:        { nome:"Título 'Proventos · 3 meses'" },
-  tituloGraficoMensal:     { nome:"Título 'Proventos mês a mês'" },
-  tituloPrevistoRealizado: { nome:"Título 'Previsto vs Realizado'" },
-  dividendosHeader:        { nome:"Rótulo 'Dividendos — total do ano'" },
+  // ─ Painel · cabeçalho ─
+  saudacao:            { nome:"Saudação (Boa noite!)",        grupo:"Cabeçalho", base:24 },
+  dataHoje:            { nome:"Data de hoje",                 grupo:"Cabeçalho", base:11 },
+  destaqueDia:         { nome:"Card de destaque do dia",      grupo:"Cabeçalho", base:11, caixa:true },
+  headerApp:           { nome:"Barra do topo do app",         grupo:"Cabeçalho", base:13, caixa:true },
+  logoApp:             { nome:"Logo/nome no topo",            grupo:"Cabeçalho", base:13 },
+  // ─ Valores principais ─
+  dividendosHeader:    { nome:"Rótulo 'Dividendos do ano'",   grupo:"Valores", base:11 },
+  dividendosValor:     { nome:"Valor dos dividendos",         grupo:"Valores", base:26 },
+  dividendosCard:      { nome:"Card dos dividendos",          grupo:"Valores", base:13, caixa:true },
+  patrimonioLabel:     { nome:"Rótulo 'Patrimônio total'",    grupo:"Valores", base:10 },
+  patrimonioValor:     { nome:"Valor do patrimônio",          grupo:"Valores", base:26 },
+  patrimonioCard:      { nome:"Card do patrimônio",           grupo:"Valores", base:13, caixa:true },
+  // ─ KPIs ─
+  kpiCarrossel:        { nome:"Carrossel de KPIs",            grupo:"KPIs", base:13, caixa:true },
+  kpiCard:             { nome:"Cards dos KPIs",               grupo:"KPIs", base:12, caixa:true },
+  kpiValor:            { nome:"Números dos KPIs",             grupo:"KPIs", base:16 },
+  kpiLabel:            { nome:"Rótulos dos KPIs",             grupo:"KPIs", base:9 },
+  // ─ Metas ─
+  metaCard:            { nome:"Card da meta",                 grupo:"Metas", base:13, caixa:true },
+  tituloMetaProventos: { nome:"Título 'Meta de proventos'",   grupo:"Metas", base:13 },
+  metaValorAtual:      { nome:"Valor atual da meta",          grupo:"Metas", base:22 },
+  metaAlvo:            { nome:"Valor alvo da meta",           grupo:"Metas", base:11 },
+  metaBarra:           { nome:"Barra de progresso da meta",   grupo:"Metas", base:13, caixa:true },
+  // ─ Blocos do painel ─
+  tituloProx3Meses:    { nome:"Título 'Proventos 3 meses'",   grupo:"Blocos", base:11 },
+  cardProx3Meses:      { nome:"Cards dos 3 meses",            grupo:"Blocos", base:13, caixa:true },
+  tituloGraficoMensal: { nome:"Título 'Proventos mês a mês'", grupo:"Blocos", base:11 },
+  cardGraficoMensal:   { nome:"Card do gráfico mensal",       grupo:"Blocos", base:13, caixa:true },
+  tituloProjecao:      { nome:"Título da Projeção",           grupo:"Blocos", base:13 },
+  cardProjecao:        { nome:"Card da Projeção",             grupo:"Blocos", base:13, caixa:true },
+  tituloPrevistoRealizado:{ nome:"Título 'Previsto vs Realizado'", grupo:"Blocos", base:13 },
+  cardPrevistoRealizado:{ nome:"Card do Previsto vs Realizado", grupo:"Blocos", base:13, caixa:true },
+  // ─ Listas e ativos ─
+  listaAtivoItem:      { nome:"Itens da lista de ativos",     grupo:"Listas", base:13, caixa:true },
+  listaAtivoTicker:    { nome:"Ticker do ativo",              grupo:"Listas", base:13 },
+  listaAtivoValor:     { nome:"Valor do ativo",               grupo:"Listas", base:13 },
+  // ─ Navegação ─
+  menuFlutuante:       { nome:"Menu flutuante inferior",      grupo:"Navegação", base:13, caixa:true },
+  menuBotao:           { nome:"Botões do menu",               grupo:"Navegação", base:8 },
+  abasInternas:        { nome:"Mini-abas do painel",          grupo:"Navegação", base:11, caixa:true },
+  // ─ Chat ─
+  chatBalaoIA:         { nome:"Balão de resposta da IA",      grupo:"Chat", base:13, caixa:true },
+  chatBalaoUsuario:    { nome:"Balão da sua mensagem",        grupo:"Chat", base:13, caixa:true },
+  chatCaixaEnvio:      { nome:"Caixa de digitar do chat",     grupo:"Chat", base:14, caixa:true },
+  chatStatus:          { nome:"Barra de status da IA",        grupo:"Chat", base:12, caixa:true },
+  // ─ Geral ─
+  fundoApp:            { nome:"Fundo geral do app",           grupo:"Geral", base:13, caixa:true },
+  todosCards:          { nome:"Todos os cards (global)",      grupo:"Geral", base:13, caixa:true },
 };
-const ANIMACOES_IA = ["nenhuma","pulsar","brilhar","flutuar"];
+const ANIMACOES_IA = ["nenhuma","pulsar","brilhar","flutuar","balancar","girar","tremer","surgir"];
 
 const ACOES_VALIDAS = {
   tema:      { label:"Trocar tema" },
@@ -929,7 +1021,151 @@ const BLOCOS_DEF = [
   { id:"previstoRealizado",nome:"Previsto vs Realizado",  emoji:"⚖️", paginaPadrao:"painel", ordemPadrao:4 },
 ];
 
-function PainelCarteira({ ativos, historico = [], proventosRecebidos, blocosRender, estiloDe = () => ({ style:{}, cls:"" }), T }) {
+// ════════════════════════════════════════════════════════════════════════════
+// MODO DE EDIÇÃO VISUAL — envolve elementos e mostra o ✏️ lapisinho ao editar
+// ════════════════════════════════════════════════════════════════════════════
+function Editavel({ id, modoEdicao, onEditar, children, inline=false, T }) {
+  if (!modoEdicao || !ELEMENTOS_ESTILO[id]) return children;
+  const def = ELEMENTOS_ESTILO[id];
+  return (
+    <span style={{ position:"relative", display: inline ? "inline-block" : "block" }}>
+      {/* contorno tracejado indicando que é editável */}
+      <span style={{ position:"absolute", inset:-3, border:`1.5px dashed ${T.accent}88`, borderRadius:8, pointerEvents:"none", zIndex:1 }}/>
+      {children}
+      <button
+        onClick={(e)=>{ e.stopPropagation(); e.preventDefault(); onEditar(id); }}
+        title={`Editar: ${def.nome}`}
+        style={{
+          position:"absolute", top:-9, right:-9, zIndex:3,
+          width:22, height:22, borderRadius:"50%", border:"none",
+          background:T.accent, color:"#fff", cursor:"pointer",
+          fontSize:11, lineHeight:1, display:"flex", alignItems:"center", justifyContent:"center",
+          boxShadow:`0 2px 8px ${T.accent}88`, padding:0,
+        }}
+      >✏️</button>
+    </span>
+  );
+}
+
+// Popup com TODAS as customizações possíveis do elemento escolhido
+function PopupCustomizar({ id, estilosCustom, setEstilosCustom, onClose, T }) {
+  const def = ELEMENTOS_ESTILO[id] || {};
+  const atual = (estilosCustom||{})[id] || {};
+  const set = (patch) => setEstilosCustom(prev=>({ ...(prev||{}), [id]: { ...((prev||{})[id]||{}), ...patch } }));
+  const resetar = () => setEstilosCustom(prev=>{ const c={ ...(prev||{}) }; delete c[id]; return Object.keys(c).length?c:null; });
+
+  const CORES = ["#e74c3c","#e67e22","#f1c40f","#2ecc71","#1abc9c","#3498db","#9b59b6","#e91e63","#607d8b","#111827","#ffffff"];
+  const FUNDOS = [
+    { lb:"Nenhum", v:null },
+    { lb:"Roxo", v:"linear-gradient(135deg,#667eea,#764ba2)" },
+    { lb:"Oceano", v:"linear-gradient(135deg,#2193b0,#6dd5ed)" },
+    { lb:"Pôr do sol", v:"linear-gradient(135deg,#ff6a00,#ee0979)" },
+    { lb:"Verde", v:"linear-gradient(135deg,#11998e,#38ef7d)" },
+    { lb:"Ouro", v:"linear-gradient(135deg,#f7971e,#ffd200)" },
+    { lb:"Escuro", v:"#1a1a2e" },
+  ];
+  const FONTES = [
+    { lb:"Padrão", v:null },
+    { lb:"Serifada", v:"Georgia, serif" },
+    { lb:"Mono", v:"monospace" },
+    { lb:"Sistema", v:"system-ui, sans-serif" },
+  ];
+  const rot = (t) => <div style={{ fontSize:10, color:T.textMute, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, margin:"14px 0 7px" }}>{t}</div>;
+  const chip = (ativo, onClick, children, extra={}) => (
+    <button onClick={onClick} style={{ padding:"7px 11px", borderRadius:8, cursor:"pointer", fontSize:11, fontWeight:700,
+      border:`1px solid ${ativo?T.accent:T.border}`, background: ativo?`${T.accent}18`:T.cardAlt, color: ativo?T.accentSoft:T.textMute, ...extra }}>{children}</button>
+  );
+  const slider = (label, prop, min, max, step, padrao) => (
+    <div style={{ marginBottom:10 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:T.textMute, marginBottom:4 }}>
+        <span>{label}</span><span style={{ fontWeight:700, color:T.text }}>{atual[prop] ?? padrao}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={atual[prop] ?? padrao}
+        onChange={e=>set({ [prop]: parseFloat(e.target.value) })}
+        style={{ width:"100%", accentColor:T.accent }}/>
+    </div>
+  );
+
+  return (
+    <div onClick={onClose} style={{ position:"fixed", inset:0, background:"#000b", zIndex:1600, display:"flex", alignItems:"flex-end", justifyContent:"center", padding:0 }}>
+      <motion.div
+        onClick={e=>e.stopPropagation()}
+        initial={{ y:"100%" }} animate={{ y:0 }} exit={{ y:"100%" }}
+        transition={{ type:"spring", stiffness:340, damping:32 }}
+        style={{ background:T.bg, borderRadius:"20px 20px 0 0", width:"100%", maxWidth:460, maxHeight:"85vh", overflowY:"auto", padding:"18px 18px 26px", boxShadow:"0 -10px 40px #000a" }}
+      >
+        <div style={{ width:38, height:4, borderRadius:2, background:T.border, margin:"0 auto 14px" }}/>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <div>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text }}>🎨 {def.nome}</div>
+            <div style={{ fontSize:9, color:T.textFaint }}>{def.grupo}</div>
+          </div>
+          <button onClick={onClose} style={{ width:32, height:32, borderRadius:8, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.text, cursor:"pointer", fontSize:15 }}>✕</button>
+        </div>
+
+        {rot("Tamanho e peso")}
+        {slider("Escala da fonte", "escala", 0.5, 3, 0.05, 1)}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {chip(atual.negrito, ()=>set({ negrito:!atual.negrito }), "B", { fontWeight:900 })}
+          {chip(atual.italico, ()=>set({ italico:!atual.italico }), "I", { fontStyle:"italic" })}
+          {chip(atual.sublinhado, ()=>set({ sublinhado:!atual.sublinhado }), "U", { textDecoration:"underline" })}
+          {chip(atual.maiuscula, ()=>set({ maiuscula:!atual.maiuscula }), "MAIÚSC")}
+        </div>
+
+        {rot("Cor do texto")}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {chip(!atual.cor, ()=>set({ cor:null }), "Padrão")}
+          {CORES.map(c=>(
+            <button key={c} onClick={()=>set({ cor:c })} style={{ width:30, height:30, borderRadius:"50%", cursor:"pointer",
+              border: atual.cor===c ? `3px solid ${T.accent}` : `1px solid ${T.border}`, background:c }}/>
+          ))}
+        </div>
+
+        {rot("Alinhamento")}
+        <div style={{ display:"flex", gap:6 }}>
+          {[["left","⬅️ Esq"],["center","↔️ Centro"],["right","➡️ Dir"]].map(([v,lb])=>chip(atual.alinhamento===v, ()=>set({ alinhamento: atual.alinhamento===v?null:v }), lb))}
+        </div>
+
+        {rot("Fonte")}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {FONTES.map(f=>chip(atual.fonte===f.v, ()=>set({ fonte:f.v }), f.lb, f.v?{ fontFamily:f.v }:{}))}
+        </div>
+
+        {rot("Fundo")}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {FUNDOS.map(f=>(
+            <button key={f.lb} onClick={()=>set({ fundo:f.v })} style={{ padding:"9px 12px", borderRadius:8, cursor:"pointer", fontSize:10, fontWeight:700,
+              border: atual.fundo===f.v ? `2px solid ${T.accent}` : `1px solid ${T.border}`,
+              background: f.v || T.cardAlt, color: f.v ? "#fff" : T.textMute }}>{f.lb}</button>
+          ))}
+        </div>
+
+        {rot("Caixa")}
+        {slider("Cantos arredondados", "raio", 0, 40, 1, 0)}
+        {slider("Espaço interno", "padding", 0, 40, 1, 0)}
+        {slider("Opacidade", "opacidade", 0.1, 1, 0.05, 1)}
+        {slider("Rotação (graus)", "rotacao", -30, 30, 1, 0)}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:6 }}>
+          {chip(!!atual.borda, ()=>set({ borda: atual.borda ? null : `2px solid ${T.accent}` }), "Borda")}
+          {chip(!!atual.sombra, ()=>set({ sombra: atual.sombra ? null : "0 8px 24px #0005" }), "Sombra")}
+          {chip(!!atual.oculto, ()=>set({ oculto:!atual.oculto }), atual.oculto ? "🚫 Oculto" : "👁 Visível")}
+        </div>
+
+        {rot("Animação")}
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          {ANIMACOES_IA.map(a=>chip((atual.animacao||"nenhuma")===a, ()=>set({ animacao:a }), a))}
+        </div>
+
+        <div style={{ display:"flex", gap:8, marginTop:20 }}>
+          <button onClick={resetar} style={{ flex:1, padding:"13px", borderRadius:10, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:12, fontWeight:700 }}>♻️ Restaurar padrão</button>
+          <button onClick={onClose} style={{ flex:1, padding:"13px", borderRadius:10, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:12, fontWeight:700 }}>✓ Pronto</button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function PainelCarteira({ ativos, historico = [], proventosRecebidos, blocosRender, estiloDe = () => ({ style:{}, cls:"" }), modoEdicao=false, onEditar=()=>{}, T }) {
   const [agrupar, setAgrupar] = useState("cat");   // "cat" | "setor"
   const [metrica, setMetrica] = useState("atual"); // "atual" | "investido"
   const [filtroCat, setFiltroCat] = useState("TUDO"); // "TUDO" | "FII" | "Ação" | "Cripto"
@@ -1017,16 +1253,16 @@ function PainelCarteira({ ativos, historico = [], proventosRecebidos, blocosRend
         return (
           <div style={{ marginBottom:20, marginTop:8 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:14 }}>
-              <span className={estiloDe("saudacao",24).cls} style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5, ...estiloDe("saudacao",24).style }}>{saud}! 👋</span>
-              <span style={{ fontSize:12, color:T.textFaint }}>{dataFmt}</span>
+              <Editavel id="saudacao" modoEdicao={modoEdicao} onEditar={onEditar} inline T={T}><span className={estiloDe("saudacao",24).cls} style={{ fontSize:24, fontWeight:800, color:T.text, letterSpacing:-0.5, ...estiloDe("saudacao",24).style }}>{saud}! 👋</span></Editavel>
+              <Editavel id="dataHoje" modoEdicao={modoEdicao} onEditar={onEditar} inline T={T}><span className={estiloDe("dataHoje",12).cls} style={{ fontSize:12, color:T.textFaint, ...estiloDe("dataHoje",12).style }}>{dataFmt}</span></Editavel>
             </div>
-            <div style={{ background:`linear-gradient(135deg, ${T.amber}1c, ${T.card})`, border:`1px solid ${T.amber}44`, borderRadius:12, padding:"11px 13px", display:"flex", alignItems:"center", gap:10 }}>
+            <Editavel id="destaqueDia" modoEdicao={modoEdicao} onEditar={onEditar} T={T}><div className={estiloDe("destaqueDia",11).cls} style={{ background:`linear-gradient(135deg, ${T.amber}1c, ${T.card})`, border:`1px solid ${T.amber}44`, borderRadius:12, padding:"11px 13px", display:"flex", alignItems:"center", gap:10, ...estiloDe("destaqueDia",11).style }}>
               <span style={{ fontSize:20 }}>{destaque.icon}</span>
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:8, color:T.amber, fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>Destaque do dia</div>
                 <div style={{ fontSize:12, color:T.text, fontWeight:600, lineHeight:1.3 }}>{destaque.txt}</div>
               </div>
-            </div>
+            </div></Editavel>
           </div>
         );
       })()}
@@ -1081,7 +1317,7 @@ function PainelCarteira({ ativos, historico = [], proventosRecebidos, blocosRend
       {vista==="resumo" && (<>
       {/* resumo geral */}
       <div style={{ background:`linear-gradient(135deg, ${T.accent}22, ${T.card})`, border:`1px solid ${T.border}`, borderRadius:14, padding:"18px", marginBottom:16 }}>
-        <div style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1 }}>💼 Patrimônio total</div>
+        <Editavel id="patrimonioLabel" modoEdicao={modoEdicao} onEditar={onEditar} T={T}><div className={estiloDe("patrimonioLabel",10).cls} style={{ fontSize:10, color:T.textFaint, textTransform:"uppercase", letterSpacing:1, ...estiloDe("patrimonioLabel",10).style }}>💼 Patrimônio total</div></Editavel>
         <div style={{ fontSize:30, fontWeight:800, color:T.text, letterSpacing:-1, lineHeight:1.1 }}>{fmt(totalAtual)}</div>
         <div style={{ fontSize:11, color:T.green, marginTop:3 }}>Proventos médios: <strong>{fmt(mediaMesPainel)}/mês</strong></div>
         <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
@@ -2263,6 +2499,7 @@ function ImportarMassa({ ativos, setAtivos, onProventosRecebidos, onClose, T }) 
           <div style={{ fontSize:11, color:T.textMute, marginBottom:12, lineHeight:1.5 }}>
             Envie o extrato de <strong style={{ color:T.text }}>Movimentação</strong> da B3 (arquivo <strong style={{ color:T.text }}>.xlsx</strong>). O app calcula sozinho quantidades e preço médio a partir das suas compras e vendas.
             <br/><span style={{ color:T.textFaint }}>Baixe em investidor.b3.com.br → Extratos → Movimentação → Exportar para Excel.</span>
+            <br/><span style={{ color:T.amber, fontWeight:600 }}>⚠️ Importante: no filtro da B3, escolha um período AMPLO (ex.: 01/01 do primeiro ano de investimento até hoje). A exportação traz apenas o período filtrado — se filtrar 30 dias, só virão 30 dias de compras e proventos.</span>
           </div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={e=>{ lerArquivo(e.target.files?.[0]); e.target.value=""; }}/>
           <button onClick={()=>fileRef.current?.click()} style={{ display:"block", width:"100%", border:`2px dashed ${T.green}66`, borderRadius:12, padding:"22px 16px", textAlign:"center", cursor:"pointer", background:`${T.green}0c`, marginBottom:12 }}>
@@ -4254,8 +4491,10 @@ function BotaoOuvirResposta({ texto, T }) {
   );
 }
 
-function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes, onAplicarAcoes, T }) {
+function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes, onAplicarAcoes, estiloDe = () => ({ style:{}, cls:"" }), T }) {
   const [mensagens, setMensagens] = useEstadoSalvo("chatHistorico", []); // persistente por usuário (PREFIXO)
+  // saneamento: se o app fechou no meio de um streaming, destrava a mensagem salva
+  useEffect(()=>{ setMensagens(m => m.some(x=>x.streaming) ? m.map(x=> x.streaming ? { ...x, streaming:false } : x) : m); }, []);
   const [input, setInput] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [anexo, setAnexo] = useState(null); // {nome, conteudo, truncado}
@@ -4504,7 +4743,7 @@ function ChatBot({ ativos, setAtivos, bridgeUrl, servidorNome, onVisualizarAcoes
                   {eu && m.anexoNome && (
                     <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#ffffff22", border:"1px solid #ffffff44", borderRadius:8, padding:"4px 8px", marginBottom:6, fontSize:11, color:"#fff" }}>📎 {m.anexoNome}</div>
                   )}
-                  {textoLimpo && <div style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap" }}>{textoLimpo}{m.streaming && <span className="cursor-pisca">▋</span>}</div>}
+                  {textoLimpo && <div className={estiloDe(eu?"chatBalaoUsuario":"chatBalaoIA",13).cls} style={{ fontSize:13, color: eu?"#fff":T.text, lineHeight:1.5, whiteSpace:"pre-wrap", ...estiloDe(eu?"chatBalaoUsuario":"chatBalaoIA",13).style }}>{textoLimpo}{m.streaming && <span className="cursor-pisca">▋</span>}</div>}
                   {!eu && !m.streaming && !m.erro && textoLimpo && <div><BotaoOuvirResposta texto={textoLimpo} T={T}/></div>}
                   {/* AÇÕES DE CONFIGURAÇÃO sugeridas pela IA — visualizar (preview) ou aplicar */}
                   {acoes.length>0 && (
@@ -4768,7 +5007,132 @@ function OrganizarBlocos({ layoutBlocos, setLayoutBlocos, onClose, T }) {
   );
 }
 
-function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onResetDados, onResetApp, onDesfazerDados, onExportar, onImportar, onExportarPDF, onOrganizarBlocos, usuario, onLogout, onClose }) {
+// ════════════════════════════════════════════════════════════════════════════
+// HISTÓRICO — compras/vendas (da planilha B3) e proventos recebidos com fiscal
+// ════════════════════════════════════════════════════════════════════════════
+function HistoricoCompleto({ ativos, proventosRecebidos, T }) {
+  const [vista, setVista] = useState("proventos"); // proventos | compras
+  const [filtroTicker, setFiltroTicker] = useState("TODOS");
+
+  const regs = (proventosRecebidos?.registros || []);
+  const totalLiq = proventosRecebidos?.total || 0;
+  const totalBruto = proventosRecebidos?.totalBruto || 0;
+  const totalImp = proventosRecebidos?.totalImposto || 0;
+
+  // todas as movimentações de compra/venda, achatadas e ordenadas
+  const movs = [];
+  ativos.forEach(a => (a.movimentacoes||[]).forEach(mv => movs.push({ ...mv, ticker:a.ticker })));
+  movs.sort((a,b)=> a.data < b.data ? 1 : -1);
+
+  const tickers = ["TODOS", ...Array.from(new Set([...regs.map(r=>r.ticker), ...movs.map(m=>m.ticker)])).sort()];
+  const regsF = filtroTicker==="TODOS" ? regs : regs.filter(r=>r.ticker===filtroTicker);
+  const movsF = filtroTicker==="TODOS" ? movs : movs.filter(m=>m.ticker===filtroTicker);
+  const dataBR = (iso) => { const [a,m,d] = String(iso||"").split("-"); return d? `${d}/${m}/${a}` : "—"; };
+  const corTipo = (t) => /juros/i.test(t) ? T.amber : /rendimento/i.test(t) ? T.cyan : T.green;
+
+  const semDados = regs.length===0 && movs.length===0;
+  if (semDados) return (
+    <div style={{ background:T.card, border:`2px dashed ${T.accentBorder}`, borderRadius:16, padding:"26px 18px", textAlign:"center" }}>
+      <div style={{ fontSize:38, marginBottom:8 }}>🗂️</div>
+      <div style={{ fontSize:15, fontWeight:800, color:T.text, marginBottom:6 }}>Nenhum histórico ainda</div>
+      <div style={{ fontSize:11, color:T.textMute, lineHeight:1.6 }}>Importe a planilha de <strong>Movimentação da B3</strong> na tela ✏️ Editar (Importar em massa → Arquivo da B3). Ela traz suas compras, vendas e os proventos recebidos.<br/><br/>💡 Na B3, use o filtro de datas <strong>amplo</strong> (ex.: 01/jan do primeiro ano até hoje) — a exportação traz só o período filtrado.</div>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* resumo fiscal dos proventos */}
+      {regs.length>0 && (
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          <div style={{ flex:1, background:`${T.green}12`, border:`1px solid ${T.green}44`, borderRadius:12, padding:"11px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Recebido (líquido)</div>
+            <div style={{ fontSize:16, fontWeight:800, color:T.green }}>{fmt(totalLiq)}</div>
+          </div>
+          <div style={{ flex:1, background:T.card, border:`1px solid ${T.border}`, borderRadius:12, padding:"11px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>Bruto</div>
+            <div style={{ fontSize:16, fontWeight:800, color:T.text }}>{fmt(totalBruto)}</div>
+          </div>
+          <div style={{ flex:1, background:`${T.amber}12`, border:`1px solid ${T.amber}44`, borderRadius:12, padding:"11px 12px" }}>
+            <div style={{ fontSize:9, color:T.textFaint }}>IR retido (JCP)</div>
+            <div style={{ fontSize:16, fontWeight:800, color:T.amber }}>{fmt(totalImp)}</div>
+          </div>
+        </div>
+      )}
+
+      {/* abas internas */}
+      <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+        {[["proventos",`💰 Proventos (${regs.length})`],["compras",`🛒 Compras e vendas (${movs.length})`]].map(([id,lb])=>(
+          <button key={id} onClick={()=>setVista(id)} style={{ flex:1, padding:"9px", borderRadius:9, border:`1px solid ${vista===id?T.accent:T.border}`, background: vista===id?T.accent:T.cardAlt, color: vista===id?"#fff":T.textMute, cursor:"pointer", fontSize:11, fontWeight:700 }}>{lb}</button>
+        ))}
+      </div>
+
+      {/* filtro por ativo */}
+      {tickers.length>2 && (
+        <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:6, marginBottom:10 }}>
+          {tickers.map(t=>(
+            <button key={t} onClick={()=>setFiltroTicker(t)} style={{ flex:"0 0 auto", padding:"6px 11px", borderRadius:7, border:`1px solid ${filtroTicker===t?T.accent:T.border}`, background: filtroTicker===t?`${T.accent}18`:T.cardAlt, color: filtroTicker===t?T.accentSoft:T.textMute, cursor:"pointer", fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>{t}</button>
+          ))}
+        </div>
+      )}
+
+      {/* PROVENTOS */}
+      {vista==="proventos" && (
+        regsF.length===0 ? <div style={{ fontSize:11, color:T.textFaint, textAlign:"center", padding:20 }}>Nenhum provento neste filtro.</div> :
+        <div>
+          {regsF.map((r,i)=>(
+            <div key={i} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:11, padding:"11px 13px", marginBottom:6 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:12, fontWeight:800, color:T.text, fontFamily:"monospace" }}>{r.ticker}</span>
+                <span style={{ fontSize:9, color:corTipo(r.tipo), background:`${corTipo(r.tipo)}18`, padding:"2px 7px", borderRadius:5, fontWeight:700 }}>{r.tipo}</span>
+                <span style={{ flex:1 }}/>
+                <span style={{ fontSize:14, fontWeight:800, color:T.green }}>{fmt(r.valor)}</span>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:5, fontSize:9, color:T.textFaint }}>
+                <span>📅 {dataBR(r.data)}</span>
+                {r.tributavel && r.imposto>0 && (
+                  <span style={{ color:T.amber }}>Bruto {fmt(r.bruto)} · IR {(r.aliquota*100).toFixed(1)}% = −{fmt(r.imposto)}</span>
+                )}
+                {!r.tributavel && <span style={{ color:T.green }}>✓ Isento de IR</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* COMPRAS E VENDAS */}
+      {vista==="compras" && (
+        movsF.length===0 ? <div style={{ fontSize:11, color:T.textFaint, textAlign:"center", padding:20 }}>Nenhuma movimentação neste filtro.</div> :
+        <div>
+          {movsF.map((m,i)=>{
+            const compra = m.qtd > 0;
+            return (
+              <div key={i} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:11, padding:"11px 13px", marginBottom:6 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:13 }}>{compra?"🟢":"🔴"}</span>
+                  <span style={{ fontSize:12, fontWeight:800, color:T.text, fontFamily:"monospace" }}>{m.ticker}</span>
+                  <span style={{ fontSize:9, color: compra?T.green:T.red, background:`${compra?T.green:T.red}18`, padding:"2px 7px", borderRadius:5, fontWeight:700 }}>{compra?"Compra":"Venda"}</span>
+                  <span style={{ flex:1 }}/>
+                  <span style={{ fontSize:13, fontWeight:800, color:T.text }}>{fmt(Math.abs(m.qtd)*(m.preco||0))}</span>
+                </div>
+                <div style={{ display:"flex", gap:10, marginTop:5, fontSize:9, color:T.textFaint }}>
+                  <span>📅 {dataBR(m.data)}</span>
+                  <span>{Math.abs(m.qtd)} × {m.preco ? fmt(m.preco) : "—"}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{ fontSize:9, color:T.textFaint, textAlign:"center", marginTop:14, lineHeight:1.6 }}>
+        Dados extraídos da planilha de Movimentação da B3.<br/>
+        Regra fiscal: dividendos e rendimentos de FII são isentos para pessoa física; JCP tem IR retido na fonte (15% até 2025, 17,5% a partir de 2026).
+      </div>
+    </div>
+  );
+}
+
+function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFontEsc, densidade, setDensidade, bridgeUrl, setBridgeUrl, onResetDados, onResetApp, onDesfazerDados, onExportar, onImportar, onExportarPDF, onOrganizarBlocos, onRemodelar, usuario, onLogout, onClose }) {
   const [showLogs, setShowLogs] = useState(false);
   const [secAberta, setSecAberta] = useState("aparencia");
   // uso de armazenamento local (dados do app no aparelho)
@@ -4889,8 +5253,13 @@ function PainelConfig({ T, temaId, setTemaId, layout, setLayout, fontEsc, setFon
 
         {/* ═══ 🧩 PÁGINAS E BLOCOS ═══ */}
         {sanfona({ id:"blocos", emoji:"🧩", titulo:"Páginas e blocos", sub:"Mova, ordene e oculte os blocos do app", children:(<>
+          <button onClick={onRemodelar} style={{
+            width:"100%", padding:"13px", borderRadius:10, cursor:"pointer", marginTop:8,
+            border:"none", background:T.accent, color:"#fff", fontSize:13, fontWeight:800
+          }}>🎨 Remodelar o app (edição visual)</button>
+          {nota("Abre o painel com um ✏️ em cada elemento personalizável. Toque no lápis para mudar tamanho, cor, fonte, fundo, cantos, animação e mais.")}
           <button onClick={onOrganizarBlocos} style={{
-            width:"100%", padding:"12px", borderRadius:10, cursor:"pointer", marginTop:8,
+            width:"100%", padding:"12px", borderRadius:10, cursor:"pointer", marginTop:12,
             border:`1px solid ${T.cyan}66`, background:`${T.cyan}14`, color:T.cyan, fontSize:13, fontWeight:700
           }}>🧩 Organizar blocos das páginas</button>
           {nota("Mova blocos entre Painel, Análises, Agenda, Ranking e Custo de vida; mude a ordem (↑↓) ou oculte. A IA também organiza por comando no chat. \"Restaurar padrão\" desfaz tudo.")}
@@ -5034,16 +5403,34 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
   // ── CAMADA 2: BLOCOS CONFIGURÁVEIS (ordem/página/visibilidade por cima da base) ──
   const [layoutBlocos, setLayoutBlocos] = useEstadoSalvo("layoutBlocos", null); // null = padrão de instalação
   const [showBlocos, setShowBlocos] = useState(false);
+  // ── MODO DE EDIÇÃO VISUAL (lapisinhos em cada elemento customizável) ──
+  const [modoEdicao, setModoEdicao] = useState(false);
+  const [editandoElemento, setEditandoElemento] = useState(null);
   // ── ESTILOS CUSTOM (camada acima — a IA estiliza elementos registrados) ──
   const [estilosCustom, setEstilosCustom] = useEstadoSalvo("estilosCustom", null); // null = padrão intacto
   const estiloDe = (id, base=13) => {
     const e = (estilosCustom||{})[id]; if (!e) return { style:{}, cls:"" };
     const style = {};
-    if (e.escala)   style.fontSize = Math.round(base*e.escala*10)/10;
-    if (e.cor)      style.color = e.cor;
+    // texto
+    if (e.escala)        style.fontSize = Math.round(base*e.escala*10)/10;
+    if (e.cor)           style.color = e.cor;
     if (e.negrito!=null) style.fontWeight = e.negrito?800:500;
-    if (e.italico)  style.fontStyle = "italic";
-    if (e.sublinhado) style.textDecoration = "underline";
+    if (e.italico)       style.fontStyle = "italic";
+    if (e.sublinhado)    style.textDecoration = "underline";
+    if (e.maiuscula)     style.textTransform = "uppercase";
+    if (e.espacamentoLetras!=null) style.letterSpacing = e.espacamentoLetras;
+    if (e.alinhamento)   style.textAlign = e.alinhamento;
+    if (e.fonte)         style.fontFamily = e.fonte;
+    // caixa / container
+    if (e.fundo)         style.background = e.fundo;
+    if (e.borda)         style.border = e.borda;
+    if (e.raio!=null)    style.borderRadius = e.raio;
+    if (e.sombra)        style.boxShadow = e.sombra;
+    if (e.padding!=null) style.padding = e.padding;
+    if (e.margem!=null)  style.margin = e.margem;
+    if (e.opacidade!=null) style.opacity = Math.max(0.1, Math.min(1, e.opacidade));
+    if (e.rotacao!=null) style.transform = `rotate(${e.rotacao}deg)`;
+    if (e.oculto)        style.display = "none";
     return { style, cls: (e.animacao && e.animacao!=="nenhuma") ? `ia-anim-${e.animacao}` : "" };
   };
   const configBloco = (id) => {
@@ -5097,11 +5484,26 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
           if (v.reset) { const c={ ...(prev||{}) }; delete c[v.id]; return Object.keys(c).length?c:null; }
           const atual = (prev||{})[v.id]||{};
           const novo = { ...atual };
+          // texto
           if (v.escala!=null) novo.escala = Math.max(0.5, Math.min(3, +v.escala||1));
-          if (v.cor) novo.cor = String(v.cor).slice(0,20);
+          if (v.cor) novo.cor = String(v.cor).slice(0,30);
           if (v.negrito!=null) novo.negrito = !!v.negrito;
           if (v.italico!=null) novo.italico = !!v.italico;
           if (v.sublinhado!=null) novo.sublinhado = !!v.sublinhado;
+          if (v.maiuscula!=null) novo.maiuscula = !!v.maiuscula;
+          if (v.espacamentoLetras!=null) novo.espacamentoLetras = Math.max(-3, Math.min(10, +v.espacamentoLetras||0));
+          if (v.alinhamento && ["left","center","right"].includes(v.alinhamento)) novo.alinhamento = v.alinhamento;
+          if (v.fonte) novo.fonte = String(v.fonte).slice(0,60);
+          // caixa
+          if (v.fundo) novo.fundo = String(v.fundo).slice(0,80);
+          if (v.borda) novo.borda = String(v.borda).slice(0,60);
+          if (v.raio!=null) novo.raio = Math.max(0, Math.min(60, +v.raio||0));
+          if (v.sombra) novo.sombra = String(v.sombra).slice(0,80);
+          if (v.padding!=null) novo.padding = Math.max(0, Math.min(60, +v.padding||0));
+          if (v.margem!=null) novo.margem = Math.max(0, Math.min(60, +v.margem||0));
+          if (v.opacidade!=null) novo.opacidade = Math.max(0.1, Math.min(1, +v.opacidade||1));
+          if (v.rotacao!=null) novo.rotacao = Math.max(-180, Math.min(180, +v.rotacao||0));
+          if (v.oculto!=null) novo.oculto = !!v.oculto;
           if (v.animacao && ANIMACOES_IA.includes(v.animacao)) novo.animacao = v.animacao;
           return { ...(prev||{}), [v.id]: novo };
         });
@@ -5272,6 +5674,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
     { titulo:"Planejamento", itens:[
       {id:"cenario",    label:"Cenário",     emoji:"🤖", desc:"Simular reinvestimento"},
       {id:"custovida",  label:"Custo de Vida",emoji:"🧾",desc:"Gastos e marcos"},
+      {id:"historico",  label:"Histórico",    emoji:"🗂️",desc:"Compras e proventos recebidos"},
       {id:"cartao",     label:"Cartão",      emoji:"💳", desc:"Jornada sem crédito"},
     ]},
     { titulo:"Gerenciar", itens:[
@@ -5283,7 +5686,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
   const abaAtual = TODAS_ABAS.find(a=>a.id===aba) || TODAS_ABAS[0];
 
   return (
-    <div className={T.espacoso ? "app-espacoso" : ""} style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:100,transition:"background 0.3s" }}>
+    <div className={T.espacoso ? "app-espacoso" : ""} style={{ background:T.bg,minHeight:"100vh",color:T.text,fontFamily:"'Inter',system-ui,sans-serif",paddingBottom:100,transition:"background 0.3s", ...estiloDe("fundoApp",13).style }}>
 
       {/* WRAPPER DE ESCALA — transform:scale escala TUDO (px fixos inclusive).
           Usa 'zoom': escala tudo (px fixos inclusive) e reflui naturalmente,
@@ -5306,9 +5709,9 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
             /* ── TV: patrimônio e dividendos lado a lado (cabe na tela grande) ── */
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", gap:16, marginBottom:14 }}>
               <div>
-                <div className={estiloDe("dividendosHeader",11).cls} style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2, ...estiloDe("dividendosHeader",11).style }}>💰 Dividendos — total do ano</div>
+                <Editavel id="dividendosHeader" modoEdicao={modoEdicao} onEditar={setEditandoElemento} T={T}><div className={estiloDe("dividendosHeader",11).cls} style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2, ...estiloDe("dividendosHeader",11).style }}>💰 Dividendos — total do ano</div></Editavel>
                 <div style={{ display:"flex", alignItems:"baseline", gap:9, flexWrap:"wrap" }}>
-                  <span style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</span>
+                  <Editavel id="dividendosValor" modoEdicao={modoEdicao} onEditar={setEditandoElemento} inline T={T}><span className={estiloDe("dividendosValor",30).cls} style={{ fontSize:30,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1, ...estiloDe("dividendosValor",30).style }}>{fmt(totalAnual)}</span></Editavel>
                   <span style={{ fontSize:18, fontWeight:800, color:T.cyan, lineHeight:1.1 }}>{fmt(provEsteMes)} <span style={{ fontSize:11, fontWeight:600 }}>este mês</span></span>
                 </div>
                 <div style={{ fontSize:11,color:T.textFaint,marginTop:2 }}>previsto para os próximos 12 meses</div>
@@ -5326,7 +5729,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
                 <span style={{ fontSize:"clamp(34px, 11vw, 52px)", fontWeight:800, color:T.text, letterSpacing:-1.5, lineHeight:1 }}>{fmt(patrimonioTotal)}</span>
               </button>
               <div>
-                <div className={estiloDe("dividendosHeader",11).cls} style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2, ...estiloDe("dividendosHeader",11).style }}>💰 Dividendos — total do ano</div>
+                <Editavel id="dividendosHeader" modoEdicao={modoEdicao} onEditar={setEditandoElemento} T={T}><div className={estiloDe("dividendosHeader",11).cls} style={{ fontSize:11,color:T.textMute,fontWeight:600,marginBottom:2, ...estiloDe("dividendosHeader",11).style }}>💰 Dividendos — total do ano</div></Editavel>
                 <div style={{ display:"flex", alignItems:"baseline", gap:8, flexWrap:"wrap" }}>
                   <span style={{ fontSize:26,fontWeight:800,color:T.text,letterSpacing:-1,lineHeight:1.1 }}>{fmt(totalAnual)}</span>
                   <span style={{ fontSize:16, fontWeight:800, color:T.cyan, lineHeight:1.1 }}>{fmt(provEsteMes)} <span style={{ fontSize:10, fontWeight:600 }}>este mês</span></span>
@@ -5375,6 +5778,59 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
 
       {showBlocos && <OrganizarBlocos layoutBlocos={layoutBlocos} setLayoutBlocos={setLayoutBlocos} onClose={()=>setShowBlocos(false)} T={T}/>}
 
+      {/* popup de customização do elemento escolhido */}
+      <AnimatePresence>
+        {editandoElemento === "__lista__" && (
+          <div onClick={()=>setEditandoElemento(null)} style={{ position:"fixed", inset:0, background:"#000b", zIndex:1600, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+            <motion.div onClick={e=>e.stopPropagation()} initial={{ y:"100%" }} animate={{ y:0 }} exit={{ y:"100%" }} transition={{ type:"spring", stiffness:340, damping:32 }}
+              style={{ background:T.bg, borderRadius:"20px 20px 0 0", width:"100%", maxWidth:460, maxHeight:"80vh", overflowY:"auto", padding:"18px 18px 26px" }}>
+              <div style={{ width:38, height:4, borderRadius:2, background:T.border, margin:"0 auto 14px" }}/>
+              <div style={{ fontSize:16, fontWeight:800, color:T.text, marginBottom:12 }}>📋 Todos os elementos</div>
+              {Array.from(new Set(Object.values(ELEMENTOS_ESTILO).map(e=>e.grupo))).map(grupo=>(
+                <div key={grupo} style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:10, color:T.textMute, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, marginBottom:6 }}>{grupo}</div>
+                  {Object.entries(ELEMENTOS_ESTILO).filter(([id,e])=>e.grupo===grupo).map(([id,e])=>(
+                    <button key={id} onClick={()=>setEditandoElemento(id)} style={{ display:"flex", alignItems:"center", gap:8, width:"100%", textAlign:"left", padding:"10px 12px", marginBottom:5, borderRadius:10, border:`1px solid ${(estilosCustom||{})[id]?T.accent:T.border}`, background:(estilosCustom||{})[id]?`${T.accent}10`:T.card, color:T.text, cursor:"pointer", fontSize:12, fontWeight:600 }}>
+                      <span>✏️</span><span style={{ flex:1 }}>{e.nome}</span>
+                      {(estilosCustom||{})[id] && <span style={{ fontSize:9, color:T.accentSoft, fontWeight:700 }}>personalizado</span>}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </motion.div>
+          </div>
+        )}
+        {editandoElemento && editandoElemento !== "__lista__" && (
+          <PopupCustomizar id={editandoElemento} estilosCustom={estilosCustom} setEstilosCustom={setEstilosCustom}
+            onClose={()=>setEditandoElemento(null)} T={T}/>
+        )}
+      </AnimatePresence>
+
+      {/* barra do MODO DE EDIÇÃO (substitui o menu flutuante enquanto ativo) */}
+      <AnimatePresence>
+        {modoEdicao && !editandoElemento && (
+          <motion.div
+            initial={{ y:100, opacity:0 }} animate={{ y:0, opacity:1 }} exit={{ y:100, opacity:0 }}
+            transition={{ type:"spring", stiffness:340, damping:28 }}
+            style={{ position:"fixed", left:0, right:0, bottom:0, zIndex:1500, background:T.card, borderTop:`2px solid ${T.accent}`, boxShadow:"0 -8px 30px #0006", padding:"12px 14px calc(12px + env(safe-area-inset-bottom))" }}
+          >
+            <div style={{ display:"flex", alignItems:"center", gap:8, maxWidth:460, margin:"0 auto" }}>
+              <span style={{ fontSize:18 }}>🎨</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:800, color:T.text }}>Modo de edição</div>
+                <div style={{ fontSize:9, color:T.textFaint }}>Toque nos ✏️ para personalizar cada elemento</div>
+              </div>
+              <button onClick={()=>setEditandoElemento("__lista__")}
+                style={{ padding:"9px 12px", borderRadius:9, border:`1px solid ${T.cyan}66`, background:`${T.cyan}14`, color:T.cyan, cursor:"pointer", fontSize:11, fontWeight:700 }}>📋 Todos</button>
+              <button onClick={()=>{ if(window.confirm("Restaurar TODOS os elementos ao padrão de instalação?")) setEstilosCustom(null); }}
+                style={{ padding:"9px 12px", borderRadius:9, border:`1px solid ${T.border}`, background:T.cardAlt, color:T.textMute, cursor:"pointer", fontSize:11, fontWeight:700 }}>♻️</button>
+              <button onClick={()=>setModoEdicao(false)}
+                style={{ padding:"11px 18px", borderRadius:9, border:"none", background:T.accent, color:"#fff", cursor:"pointer", fontSize:12, fontWeight:800 }}>✓ Concluir</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* POPUP GLOBAL DE EDITAR/ADICIONAR ATIVO — abre de qualquer lugar */}
       {editandoTicker!==undefined && (
         <EditarAtivoPopup ticker={editandoTicker} ativos={ativos} setAtivos={setAtivos} onClose={()=>setEditandoTicker(undefined)} T={T}/>
@@ -5399,34 +5855,60 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
       )}
 
       {!showCarteira && !showReserva && !previewAtivo && editandoTicker===undefined && (
-        <div style={{ position:"fixed", left:0, right:0, bottom:14, display:"flex", justifyContent:"center", zIndex:900, pointerEvents:"none" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:4, background:T.card, border:`1px solid ${T.borderSoft}`, borderRadius:30, padding:"7px 10px", boxShadow:"0 8px 30px #0006", pointerEvents:"auto" }}>
+        <motion.div
+          initial={{ y:80, opacity:0 }}
+          animate={{ y: modoEdicao ? 120 : 0, opacity: modoEdicao ? 0 : 1 }}
+          transition={{ type:"spring", stiffness:320, damping:26 }}
+          style={{ position:"fixed", left:0, right:0, bottom:14, display:"flex", justifyContent:"center", zIndex:900, pointerEvents: modoEdicao ? "none" : "none" }}
+        >
+          <motion.div layout className={estiloDe("menuFlutuante",13).cls} style={{ display:"flex", alignItems:"center", gap:4, background:T.card, border:`1px solid ${T.borderSoft}`, borderRadius:30, padding:"7px 10px", boxShadow:"0 8px 30px #0006", pointerEvents: modoEdicao ? "none" : "auto", ...estiloDe("menuFlutuante",13).style }}>
             {[
               { id:"analises",   ic:"🔬", lb:"Análises" },
-              { id:"calendario", ic:"📅", lb:"Agenda" },
+              { id:"__chat__",   ic:"🤖", lb:"IA" },
               { id:"__home__",   ic:"🏠", lb:"Início" },
               { id:"ranking",    ic:"🏆", lb:"Ranking" },
               { id:"editar",     ic:"✏️", lb:"Editar" },
             ].map(item=>{
               const home = item.id==="__home__";
-              const ativoTab = home ? aba==="painel" : aba===item.id;
+              const chat = item.id==="__chat__";
+              const ativoTab = home ? aba==="painel" : chat ? aba==="chat" : aba===item.id;
+              const corFundo = home ? T.accent : chat ? (ativoTab ? T.cyan : `${T.cyan}18`) : (ativoTab ? T.accentBg : "transparent");
+              const corTexto = home ? "#fff" : chat ? (ativoTab ? "#fff" : T.cyan) : (ativoTab ? T.accent : T.textMute);
               return (
-                <button key={item.id} onClick={()=>{ const alvo = home?"painel":item.id; if (aba===alvo) { try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ window.scrollTo(0,0);} } else { setAba(alvo); } }} title={item.lb} style={{
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:1, cursor:"pointer", border:"none",
-                  background: home ? T.accent : (ativoTab ? T.accentBg : "transparent"),
-                  color: home ? "#fff" : (ativoTab ? T.accent : T.textMute),
-                  borderRadius: home ? "50%" : 14,
-                  width: home ? 52 : 52, height: home ? 52 : 46,
-                  padding:0, transform: home ? "translateY(-6px)" : "none",
-                  boxShadow: home ? `0 6px 16px ${T.accent}66` : "none",
-                }}>
-                  <span style={{ fontSize: home ? 22 : 17 }}>{item.ic}</span>
+                <motion.button
+                  key={item.id}
+                  onClick={()=>{
+                    const alvo = home ? "painel" : chat ? "chat" : item.id;
+                    if (aba===alvo) { try{ window.scrollTo({top:0,behavior:"smooth"}); }catch(e){ window.scrollTo(0,0);} }
+                    else { setAba(alvo); }
+                  }}
+                  title={item.lb}
+                  whileTap={{ scale:0.88 }}
+                  whileHover={{ scale:1.06 }}
+                  animate={{ scale: ativoTab ? 1.04 : 1, y: home ? -6 : 0 }}
+                  transition={{ type:"spring", stiffness:420, damping:22 }}
+                  style={{
+                    position:"relative",
+                    display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:1, cursor:"pointer", border:"none",
+                    background: corFundo, color: corTexto,
+                    borderRadius: home ? "50%" : chat ? "50%" : 14,
+                    width: 52, height: (home||chat) ? 52 : 46, padding:0,
+                    boxShadow: home ? `0 6px 16px ${T.accent}66` : chat && ativoTab ? `0 6px 16px ${T.cyan}66` : "none",
+                    ...estiloDe("menuBotao",8).style,
+                  }}
+                >
+                  {/* indicador animado da aba ativa (layoutId faz o "pill" deslizar entre os botões) */}
+                  {ativoTab && !home && !chat && (
+                    <motion.span layoutId="abaAtiva" transition={{ type:"spring", stiffness:400, damping:30 }}
+                      style={{ position:"absolute", inset:0, borderRadius:14, border:`2px solid ${T.accent}`, pointerEvents:"none" }}/>
+                  )}
+                  <span style={{ fontSize: (home||chat) ? 22 : 17 }}>{item.ic}</span>
                   <span style={{ fontSize:8, fontWeight:700 }}>{item.lb}</span>
-                </button>
+                </motion.button>
               );
             })}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
 
       {showConfig && (
@@ -5443,7 +5925,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
               setAtivos(ATIVOS_INICIAIS.map(a=>({...a})));
               setMetaMensal(500); setMetaAporte(0);
               setCustoVida({ agua:100, luz:200, condominio:0, aluguel:1000, internet:120, outros:0 });
-              setProventosRecebidos({ porMes:{}, total:0, registros:[] });
+              setProventosRecebidos({ porMes:{}, porMesBruto:{}, total:0, totalBruto:0, totalImposto:0, registros:[] });
               registrarLog("sistema","Reset de dados da carteira (backup guardado)",{ direcao:"interno", origem:"app" });
               setShowConfig(false);
             }
@@ -5489,6 +5971,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
           }}
           usuario={usuario}
           onLogout={onLogout}
+          onRemodelar={()=>{ setShowConfig(false); setAba("painel"); setModoEdicao(true); }}
           onOrganizarBlocos={()=>{ setShowConfig(false); setShowBlocos(true); }}
           onExportarPDF={()=>{
             try {
@@ -5616,7 +6099,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
         )}
 
         {/* ABA PAINEL (dashboard) */}
-        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} proventosRecebidos={proventosRecebidos} blocosRender={blocosJSX("painel")} estiloDe={estiloDe} T={T}/>}
+        {aba==="painel" && <PainelCarteira ativos={ativos} historico={historico} proventosRecebidos={proventosRecebidos} blocosRender={blocosJSX("painel")} estiloDe={estiloDe} modoEdicao={modoEdicao} onEditar={setEditandoElemento} T={T}/>}
 
 
         {/* ABA CALENDÁRIO */}
@@ -5681,6 +6164,8 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
         {/* ABA CUSTO DE VIDA */}
         {aba==="custovida" && (<>{blocosJSX("custovida")}<CustoVida custoVida={custoVida} setCustoVida={setCustoVida} mediaMes={mediaMes} T={T}/></>)}
 
+        {aba==="historico" && <HistoricoCompleto ativos={ativos} proventosRecebidos={proventosRecebidos} T={T}/>}
+
         {/* ABA CARTÃO */}
         {aba==="cartao" && <CartaoCredito ativos={ativos} mediaMes={mediaMes} custoVida={custoVida} setCustoVida={setCustoVida} fundosProvisionados={fundosProvisionados} setFundosProvisionados={setFundosProvisionados} T={T}/>}
 
@@ -5688,7 +6173,7 @@ function AppCarteira({ usuario, contaNome, onLogout }) {
         {aba==="editar" && <EditarAtivos ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} T={T}/>}
 
         {/* ABA CHAT / ASSISTENTE IA */}
-        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} servidorNome={servidorNome} onVisualizarAcoes={entrarPreview} onAplicarAcoes={executarAcoes} T={T}/>}
+        {aba==="chat" && <ChatBot ativos={ativos} setAtivos={setAtivos} bridgeUrl={bridgeUrl} servidorNome={servidorNome} onVisualizarAcoes={entrarPreview} onAplicarAcoes={executarAcoes} T={T} estiloDe={estiloDe}/>}
 
         {(aba==="analises"||aba==="ranking") && (
           <div style={{ background:T.cardAlt,border:`1px dashed ${T.borderSoft}`,borderRadius:10,padding:"10px 12px",marginTop:14 }}>
