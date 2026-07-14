@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
 // Motion (ex-Framer Motion): animações aceleradas por hardware, fluidas no APK e no desktop.
 // Respeita a preferência de "movimento reduzido" do sistema por padrão.
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import {
