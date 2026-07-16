@@ -165,3 +165,19 @@ button:active {
 .ia-anim-brilhar { animation: iaBrilhar 1.8s ease-in-out infinite; }
 @keyframes iaFlutuar { 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-3px); } }
 .ia-anim-flutuar { display:inline-block; animation: iaFlutuar 2s ease-in-out infinite; }
+
+/* ── Novas animações da IA (comando "estilo") ── */
+@keyframes iaBalancar { 0%,100%{ transform:rotate(-3deg); } 50%{ transform:rotate(3deg); } }
+.ia-anim-balancar { display:inline-block; animation: iaBalancar 1.4s ease-in-out infinite; }
+@keyframes iaGirar { from{ transform:rotate(0); } to{ transform:rotate(360deg); } }
+.ia-anim-girar { display:inline-block; animation: iaGirar 3s linear infinite; }
+@keyframes iaTremer { 0%,100%{ transform:translateX(0); } 25%{ transform:translateX(-2px); } 75%{ transform:translateX(2px); } }
+.ia-anim-tremer { display:inline-block; animation: iaTremer 0.4s ease-in-out infinite; }
+@keyframes iaSurgir { from{ opacity:0; transform:translateY(8px); } to{ opacity:1; transform:translateY(0); } }
+.ia-anim-surgir { animation: iaSurgir 0.6s ease-out; }
+
+/* Respeita quem prefere movimento reduzido (acessibilidade) */
+@media (prefers-reduced-motion: reduce) {
+  .ia-anim-pulsar, .ia-anim-brilhar, .ia-anim-flutuar,
+  .ia-anim-balancar, .ia-anim-girar, .ia-anim-tremer, .ia-anim-surgir { animation: none !important; }
+}
